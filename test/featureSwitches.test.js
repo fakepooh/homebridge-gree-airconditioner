@@ -38,6 +38,7 @@ test('Auto Fan reflects only explicitly reported Auto speed and gives Turbo prec
   assert.deepEqual(autoFanFeatureSwitchCommand({ WdSpd: 0 }), { WdSpd: 0, Tur: 0 });
   assert.deepEqual(autoFanFeatureSwitchCommand({ WdSpd: 1, Tur: 0 }), { WdSpd: 0, Tur: 0 });
   assert.deepEqual(autoFanFeatureSwitchCommand({ WdSpd: 0, Tur: 1 }), { WdSpd: 0, Tur: 0 });
+  assert.deepEqual(autoFanFeatureSwitchCommand({ WdSpd: 0, Tur: 0, Quiet: 2 }), { WdSpd: 0, Quiet: 0, Tur: 0 });
   assert.deepEqual(featureSwitchCommand('autoFan', true), { WdSpd: 0, Tur: 0 });
   assert.deepEqual(featureSwitchCommand('autoFan', false), {});
 });

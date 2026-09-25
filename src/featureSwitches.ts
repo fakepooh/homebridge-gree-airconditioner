@@ -52,7 +52,10 @@ export function projectAutoFan(status: Record<string, unknown>): boolean | undef
 }
 
 export function autoFanFeatureSwitchCommand(status: Record<string, unknown>): Record<string, number> {
-  return status.WdSpd === 0 && status.Tur === 0 ? {} : { WdSpd: 0, Tur: 0 };
+  if (status.WdSpd === 0 && status.Tur === 0 && status.Quiet !== 2) {
+    return {};
+  }
+  return status.Quiet === 2 ? { WdSpd: 0, Quiet: 0, Tur: 0 } : { WdSpd: 0, Tur: 0 };
 }
 
 export function quietFeatureSwitchCommand(
