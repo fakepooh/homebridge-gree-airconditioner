@@ -149,3 +149,15 @@ export function turboFeatureSwitchCommand(
   }
   return featureSwitchCommand('powerful', enabled);
 }
+
+export function xFanFeatureSwitchCommand(
+  enabled: boolean,
+  reportedMode: unknown,
+  coolMode: number,
+  dryMode: number,
+): Record<string, number> {
+  if (!enabled || reportedMode === coolMode || reportedMode === dryMode) {
+    return featureSwitchCommand('xFan', enabled);
+  }
+  return {};
+}

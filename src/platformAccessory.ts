@@ -10,7 +10,7 @@ import type { CommandValueMap, Commands } from './commands.js';
 import commands from './commands.js';
 import { FEATURE_SWITCHES, FEATURE_SWITCH_SERVICES, autoFanFeatureSwitchCommand, featureSwitchCommand,
   mergeFeatureSwitchConfig, projectFeatureSwitch, quietFeatureSwitchCommand, turboFeatureSwitchCommand,
-  turboRotationSpeedProjection, xFanModeCommand } from './featureSwitches.js';
+  turboRotationSpeedProjection, xFanFeatureSwitchCommand, xFanModeCommand } from './featureSwitches.js';
 import type { FeatureSwitchName } from './featureSwitches.js';
 
 /**
@@ -490,6 +490,12 @@ export class GreeAirConditioner {
     } else if (name === 'powerful') {
       const command = turboFeatureSwitchCommand(enabled, this.status[commands.mode.code],
         commands.mode.value.cool, commands.mode.value.heat);
+      if (Object.keys(command).length > 0) {
+        this.sendCommand(command);
+      }
+    } else if (name === 'xFan') {
+      const command = xFanFeatureSwitchCommand(enabled, this.status[commands.mode.code],
+        commands.mode.value.cool, commands.mode.value.dry);
       if (Object.keys(command).length > 0) {
         this.sendCommand(command);
       }

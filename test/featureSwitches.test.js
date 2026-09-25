@@ -14,6 +14,7 @@ import {
   sendQuietFeatureSwitchCommand,
   turboRotationSpeedProjection,
   turboFeatureSwitchCommand,
+  xFanFeatureSwitchCommand,
   xFanModeCommand,
 } from '../dist/featureSwitches.js';
 import { DEFAULT_DEVICE_CONFIG } from '../dist/settings.js';
@@ -112,6 +113,14 @@ test('X-Fan, Health, and Light project raw values and write only their own prope
   }
   assert.deepEqual(featureSwitchCommand('xFan', true), { Blo: 1 });
   assert.deepEqual(featureSwitchCommand('xFan', false), { Blo: 0 });
+  assert.deepEqual(xFanFeatureSwitchCommand(true, 1, 1, 2), { Blo: 1 });
+  assert.deepEqual(xFanFeatureSwitchCommand(true, 2, 1, 2), { Blo: 1 });
+  for (const mode of [0, 3, 4, undefined, 99]) {
+    assert.deepEqual(xFanFeatureSwitchCommand(true, mode, 1, 2), {});
+  }
+  for (const mode of [0, 1, 2, 3, 4, undefined, 99]) {
+    assert.deepEqual(xFanFeatureSwitchCommand(false, mode, 1, 2), { Blo: 0 });
+  }
   assert.deepEqual(xFanModeCommand(true, 1, 0, 1, 2), { Blo: 1 });
   assert.deepEqual(xFanModeCommand(true, 4, 1, 1, 2), { Blo: 0 });
   assert.deepEqual(xFanModeCommand(false, 1, 0, 1, 2), {});
