@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { URL } from 'node:url';
 
 import {
   FEATURE_SWITCHES,
@@ -8,6 +9,10 @@ import {
   featureSwitchCommand,
   mergeFeatureSwitchConfig,
   projectFeatureSwitch,
+  quietFeatureSwitchCommand,
+  sendQuietFeatureSwitchCommand,
+  turboRotationSpeedProjection,
+  xFanModeCommand,
 } from '../dist/featureSwitches.js';
 import { DEFAULT_DEVICE_CONFIG } from '../dist/settings.js';
 
@@ -18,13 +23,46 @@ test('Auto Fan reflects only explicitly reported Auto speed and gives Turbo prec
     assert.equal(projectFeatureSwitch('autoFan', { WdSpd: speed, Tur: 0 }), false);
   }
   assert.equal(projectFeatureSwitch('autoFan', { Tur: 0 }), undefined);
+  assert.equal(projectFeatureSwitch('autoFan', { WdSpd: 0 }), undefined);
 });
 
-test('Quiet is a momentary action and OFF requests no command', () => {
+test('Quiet is a momentary action, is mode-gated, and OFF requests no command', () => {
   assert.equal(projectFeatureSwitch('quiet', {}), false);
   assert.equal(projectFeatureSwitch('quiet', { Quiet: 2, WdSpd: 1 }), false);
   assert.deepEqual(featureSwitchCommand('quiet', true), { Quiet: 2 });
   assert.deepEqual(featureSwitchCommand('quiet', false), {});
+  assert.deepEqual(quietFeatureSwitchCommand(true, 2, 2, 3), { Quiet: 2 });
+  assert.deepEqual(quietFeatureSwitchCommand(true, 1, 2, 3), {});
+  assert.deepEqual(quietFeatureSwitchCommand(false, 2, 2, 3), {});
+  assert.deepEqual(projectFeatureSwitch('quiet', { Quiet: 2 }), false);
+});
+
+test('repeated Quiet actions each send Quiet=2 despite an acknowledgement awaiting status reset', () => {
+  const commands = [];
+  const status = { Quiet: 0 };
+  const sendCommand = (command) => {
+    commands.push(command);
+    status.Quiet = 2; // Simulate the acknowledgement before the next tap.
+  };
+
+  sendQuietFeatureSwitchCommand(true, 2, 2, 3, sendCommand);
+  sendQuietFeatureSwitchCommand(true, 2, 2, 3, sendCommand);
+  assert.deepEqual(commands, [{ Quiet: 2 }, { Quiet: 2 }]);
+  // Any delayed reconciliation projects the momentary switch OFF from current status.
+  assert.equal(projectFeatureSwitch('quiet', status), false);
+});
+
+test('Turbo status updates its slider projection without replacing the saved fan preference', () => {
+  const savedRotationSpeed = 2; // Auto
+  assert.deepEqual(featureSwitchCommand('powerful', true), { Tur: 1 });
+  assert.deepEqual(featureSwitchCommand('powerful', false), { Tur: 0 });
+  const turboOnProjection = turboRotationSpeedProjection(8, savedRotationSpeed);
+  assert.equal(turboOnProjection.rotationSpeed, 8);
+  assert.equal(turboOnProjection.preferredSpeed, savedRotationSpeed);
+
+  const laterModeRestore = turboRotationSpeedProjection(8, turboOnProjection.preferredSpeed);
+  assert.equal(laterModeRestore.preferredSpeed, 2);
+  assert.notEqual(laterModeRestore.preferredSpeed, 8); // Do not restore the slider's Turbo display as High.
 });
 
 test('Turbo changes Tur only and projects reported state', () => {
@@ -43,6 +81,9 @@ test('X-Fan, Health, and Light project raw values and write only their own prope
   }
   assert.deepEqual(featureSwitchCommand('xFan', true), { Blo: 1 });
   assert.deepEqual(featureSwitchCommand('xFan', false), { Blo: 0 });
+  assert.deepEqual(xFanModeCommand(true, 1, 0, 1, 2), { Blo: 1 });
+  assert.deepEqual(xFanModeCommand(true, 4, 1, 1, 2), { Blo: 0 });
+  assert.deepEqual(xFanModeCommand(false, 1, 0, 1, 2), {});
   assert.deepEqual(featureSwitchCommand('health', true), { Health: 1 });
   assert.deepEqual(featureSwitchCommand('health', false), { Health: 0 });
   assert.deepEqual(featureSwitchCommand('light', true), { Lig: 1 });
@@ -75,4 +116,11 @@ test('optional services have stable unique subtypes', () => {
   assert.equal(new Set(subtypes).size, FEATURE_SWITCHES.length);
   assert.equal(FEATURE_SWITCH_SERVICES.powerful.displayName, 'Turbo');
   assert.equal(FEATURE_SWITCH_SERVICES.light.displayName, 'GREE Light');
+});
+
+test('npm test runs a fresh production build first', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(packageJson.scripts.pretest, 'npm run build');
+  assert.equal(packageJson.scripts.test, 'node --test test/*.test.js');
 });

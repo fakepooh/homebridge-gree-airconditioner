@@ -45,7 +45,59 @@ export function projectAutoFan(status: Record<string, unknown>): boolean | undef
     status.WdSpd !== 4 && status.WdSpd !== 5) {
     return undefined;
   }
-  return status.WdSpd === 0 && status.Tur !== 1;
+  if (status.WdSpd !== 0) {
+    return false;
+  }
+  if (status.Tur !== 0 && status.Tur !== 1) {
+    return undefined;
+  }
+  return status.Tur === 0;
+}
+
+export function quietFeatureSwitchCommand(
+  enabled: boolean,
+  targetMode: number | undefined,
+  coolMode: number,
+  heatMode: number,
+): Record<string, number> {
+  return enabled && (targetMode === coolMode || targetMode === heatMode) ? { Quiet: 2 } : {};
+}
+
+export function sendQuietFeatureSwitchCommand(
+  enabled: boolean,
+  targetMode: number | undefined,
+  coolMode: number,
+  heatMode: number,
+  sendCommand: (command: Record<string, number>) => void,
+): Record<string, number> {
+  const command = quietFeatureSwitchCommand(enabled, targetMode, coolMode, heatMode);
+  if (Object.keys(command).length > 0) {
+    sendCommand(command);
+  }
+  return command;
+}
+
+export function turboRotationSpeedProjection(maxSpeed: number, preferredSpeed: number): {
+  rotationSpeed: number;
+  preferredSpeed: number;
+} {
+  return { rotationSpeed: maxSpeed, preferredSpeed };
+}
+
+export function xFanModeCommand(
+  enabled: boolean,
+  mode: number,
+  currentBlo: unknown,
+  coolMode: number,
+  dryMode: number,
+): Record<string, number> {
+  if (!enabled) {
+    return {};
+  }
+  if ([coolMode, dryMode].includes(mode)) {
+    return currentBlo !== 1 ? { Blo: 1 } : {};
+  }
+  return currentBlo !== 0 ? { Blo: 0 } : {};
 }
 
 export function projectFeatureSwitch(name: FeatureSwitchName, status: Record<string, unknown>): boolean | undefined {

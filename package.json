@@ -33,6 +33,7 @@
   "scripts": {
     "build": "genversion --esm -s src/version.ts && rimraf ./dist && tsc",
     "lint": "eslint . --max-warnings=0",
+    "pretest": "npm run build",
     "test": "node --test test/*.test.js",
     "prepublishOnly": "npm run lint && npm run build",
     "watch": "npm run build && npm link && nodemon",

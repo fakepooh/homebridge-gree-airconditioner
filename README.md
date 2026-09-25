@@ -114,7 +114,7 @@ The device's reported status is authoritative for persistent switches. HomeKit d
 * **Health** - controls the GREE Health function.
 * **GREE Light** - controls the GREE `Lig` / Light function; the exact physical indicator behavior may vary.
 
-Support for these properties varies across GREE models and firmware. The plugin does not infer support from the model name; an enabled switch is available once its relevant state has been reported.
+Support for these properties varies across GREE models and firmware. The plugin does not infer support from the model name. Enabling a switch creates its HomeKit service from configuration; its state remains unavailable until the device reports the relevant property. If a model never reports that property, the configured switch remains present but unavailable.
 
 ## Installation instructions
 
