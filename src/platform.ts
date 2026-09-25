@@ -10,6 +10,7 @@ import { PLATFORM_NAME, PLUGIN_NAME, UDP_SCAN_PORT, DEFAULT_DEVICE_CONFIG, MODIF
   DEF_SCAN_INTERVAL, TEMPERATURE_LIMITS, TEMPERATURE_STEPS, BINDING_TIMEOUT } from './settings.js';
 
 import commands from './commands.js';
+import { mergeFeatureSwitchConfig } from './featureSwitches.js';
 import { version } from './version.js';
 
 // This is only required when using Custom Services and Characteristics not support by HomeKit
@@ -377,13 +378,15 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
         { encryptionVersion: DEFAULT_DEVICE_CONFIG.encryptionVersion } : {}),
     };
     // assign customized default to missing parameters
-    Object.entries(this.config.devices?.find((item: { mac?: string, disabled?: boolean }) => item.mac?.toLowerCase() === 'default' &&
-      !item?.disabled) || {})
+    const defaultDeviceConfig = this.config.devices?.find((item: { mac?: string, disabled?: boolean }) =>
+      item.mac?.toLowerCase() === 'default' && !item?.disabled);
+    Object.entries(defaultDeviceConfig || {})
       .forEach(([key, value]) => {
-        if (!['mac', 'name', 'ip', 'port', 'disabled'].includes(key) && deviceConfig[key] === undefined) {
+        if (!['mac', 'name', 'ip', 'port', 'disabled', 'featureSwitches'].includes(key) && deviceConfig[key] === undefined) {
           deviceConfig[key] = value;
         }
       });
+    deviceConfig.featureSwitches = mergeFeatureSwitchConfig(defaultDeviceConfig?.featureSwitches, devcfg.featureSwitches);
     // try to assign temperatureStepSize from Homebridge UI if missing in configuration
     if (deviceConfig.temperatureStepSize === undefined && this.tempUnit === 'c') {
       deviceConfig.temperatureStepSize = TEMPERATURE_STEPS.celsius;

@@ -8,6 +8,9 @@ import { GreeAirConditionerTS } from './tsAccessory.js';
 import crypto from './crypto.js';
 import type { CommandValueMap, Commands } from './commands.js';
 import commands from './commands.js';
+import { FEATURE_SWITCHES, FEATURE_SWITCH_SERVICES, featureSwitchCommand, mergeFeatureSwitchConfig,
+  projectFeatureSwitch } from './featureSwitches.js';
+import type { FeatureSwitchName } from './featureSwitches.js';
 
 /**
  * Platform Accessory
@@ -18,6 +21,7 @@ export class GreeAirConditioner {
   private HeaterCooler?: Service;
   private TemperatureSensor?: Service;
   private Fan?: Service;
+  private featureSwitchServices: Partial<Record<FeatureSwitchName, Service>> = {};
   public key?: string;
   private cols?: Array<string>;
   private status: { [key: string]: unknown };
@@ -213,6 +217,8 @@ export class GreeAirConditioner {
     this.TemperatureSensor?.setPrimaryService(false);
     this.Fan?.setPrimaryService(false);
 
+    this.initFeatureSwitchServices();
+
     this.platform.api.updatePlatformAccessories([this.accessory]);
 
     // each service must implement at-minimum the "required characteristics" for the given service type
@@ -275,6 +281,13 @@ export class GreeAirConditioner {
     this.Fan?.getCharacteristic(this.platform.Characteristic.RotationSpeed)
       .onGet(this.getFanRotationSpeed.bind(this))
       .onSet(this.setFanRotationSpeed.bind(this));
+
+    for (const name of FEATURE_SWITCHES) {
+      const service = this.featureSwitchServices[name];
+      service?.getCharacteristic(this.platform.Characteristic.On)
+        .onGet(() => this.getFeatureSwitch(name))
+        .onSet((value) => this.setFeatureSwitch(name, value === true));
+    }
 
     // register handlers for the Name Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.Name)
@@ -420,6 +433,71 @@ export class GreeAirConditioner {
     }
     this.accessory.context.HeaterCoolerRotationSpeed = value;
     this.platform.api.updatePlatformAccessories([this.accessory]);
+  }
+
+  private initFeatureSwitchServices() {
+    const configured = mergeFeatureSwitchConfig(undefined, this.deviceConfig.featureSwitches);
+    for (const name of FEATURE_SWITCHES) {
+      const { displayName, subtype } = FEATURE_SWITCH_SERVICES[name];
+      const cached = this.accessory.getServiceById(this.platform.Service.Switch, subtype);
+      if (configured[name]) {
+        this.featureSwitchServices[name] = cached ||
+          this.accessory.addService(this.platform.Service.Switch, displayName, subtype);
+        this.featureSwitchServices[name]?.setCharacteristic(this.platform.Characteristic.Name, displayName);
+      } else if (cached) {
+        this.accessory.removeService(cached);
+      }
+    }
+  }
+
+  private async getFeatureSwitch(name: FeatureSwitchName): Promise<CharacteristicValue> {
+    const value = projectFeatureSwitch(name, this.status);
+    if (value === undefined) {
+      throw new Error(`GREE ${FEATURE_SWITCH_SERVICES[name].displayName} state is not available yet`);
+    }
+    return value;
+  }
+
+  private setFeatureSwitch(name: FeatureSwitchName, enabled: boolean) {
+    const service = this.featureSwitchServices[name];
+    if (!service) {
+      return;
+    }
+    if (name === 'quiet') {
+      if (enabled) {
+        this.quietMode = commands.quietMode.value.on;
+      }
+      setTimeout(() => this.updateFeatureSwitchValue(name), 0);
+      return;
+    }
+    if (name === 'autoFan' && !enabled) {
+      const current = projectFeatureSwitch(name, this.status);
+      if (current !== undefined) {
+        setTimeout(() => this.updateFeatureSwitchValue(name), 0);
+      }
+      return;
+    }
+    const command = featureSwitchCommand(name, enabled);
+    if (name === 'autoFan') {
+      const alreadyAuto = this.status[commands.speed.code] === commands.speed.value.auto &&
+        this.quietMode === commands.quietMode.value.off && this.powerfulMode === commands.powerfulMode.value.off;
+      const commandNeededBeforeStatus = !Object.hasOwn(this.status, commands.speed.code) &&
+        this.quietMode === commands.quietMode.value.off && this.powerfulMode === commands.powerfulMode.value.off;
+      this.speed = commands.speed.value.auto;
+      if (!alreadyAuto && commandNeededBeforeStatus) {
+        this.sendCommand(command);
+      }
+    } else {
+      this.sendCommand(command);
+    }
+    setTimeout(() => this.updateFeatureSwitchValue(name), 0);
+  }
+
+  private updateFeatureSwitchValue(name: FeatureSwitchName) {
+    const value = projectFeatureSwitch(name, this.status);
+    if (value !== undefined) {
+      this.featureSwitchServices[name]?.getCharacteristic(this.platform.Characteristic.On).updateValue(value);
+    }
   }
 
   async setFanRotationSpeed(value: CharacteristicValue) {
@@ -1398,6 +1476,7 @@ export class GreeAirConditioner {
   }
 
   updateStatus(props: string[]) {
+    this.updateFeatureSwitches(props);
     this.platform.log.debug(`[${this.getDeviceLabel()}] updateStatus -> %j`, props);
     const hcActive = this.power && [commands.mode.value.cool, commands.mode.value.heat, commands.mode.value.auto].includes(this.mode);
     const fanActive = this.power && this.mode === commands.mode.value.fan;
@@ -1563,7 +1642,7 @@ export class GreeAirConditioner {
           `${maxSpeed.toString()} (powerful)`);
         this.HeaterCooler?.getCharacteristic(this.platform.Characteristic.RotationSpeed).updateValue(maxSpeed);
         this.accessory.context.HeaterCoolerRotationSpeed = maxSpeed;
-      } else if (props.includes(commands.speed.code)) {
+      } else if (props.includes(commands.speed.code) || props.includes(commands.powerfulMode.code)) {
         let speedValue = 2; // default: auto
         switch (this.speed) {
         case commands.speed.value.low:
@@ -1616,6 +1695,26 @@ export class GreeAirConditioner {
       this.platform.log.debug(`[${this.getDeviceLabel()}] updateStatus (Fan Rotation Speed) ->`,
         `${Math.round(fanSpeedValue as number)}% (${speedName})`);
       this.Fan?.getCharacteristic(this.platform.Characteristic.RotationSpeed).updateValue(fanSpeedValue);
+    }
+  }
+
+  private updateFeatureSwitches(props: string[]) {
+    const properties: Record<FeatureSwitchName, string[]> = {
+      autoFan: [commands.speed.code, commands.powerfulMode.code],
+      quiet: [commands.quietMode.code],
+      powerful: [commands.powerfulMode.code],
+      xFan: [commands.xFan.code],
+      health: [commands.health.code],
+      light: [commands.light.code],
+    };
+    for (const name of FEATURE_SWITCHES) {
+      if (!properties[name].some((property) => props.includes(property))) {
+        continue;
+      }
+      const value = projectFeatureSwitch(name, this.status);
+      if (value !== undefined) {
+        this.featureSwitchServices[name]?.getCharacteristic(this.platform.Characteristic.On).updateValue(value);
+      }
     }
   }
 
