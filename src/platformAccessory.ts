@@ -8,8 +8,9 @@ import { GreeAirConditionerTS } from './tsAccessory.js';
 import crypto from './crypto.js';
 import type { CommandValueMap, Commands } from './commands.js';
 import commands from './commands.js';
-import { FEATURE_SWITCHES, FEATURE_SWITCH_SERVICES, featureSwitchCommand, mergeFeatureSwitchConfig,
-  projectFeatureSwitch, sendQuietFeatureSwitchCommand, turboRotationSpeedProjection, xFanModeCommand } from './featureSwitches.js';
+import { FEATURE_SWITCHES, FEATURE_SWITCH_SERVICES, autoFanFeatureSwitchCommand, featureSwitchCommand,
+  mergeFeatureSwitchConfig, projectFeatureSwitch, quietFeatureSwitchCommand, turboFeatureSwitchCommand,
+  turboRotationSpeedProjection, xFanModeCommand } from './featureSwitches.js';
 import type { FeatureSwitchName } from './featureSwitches.js';
 
 /**
@@ -464,13 +465,10 @@ export class GreeAirConditioner {
       return;
     }
     if (name === 'quiet') {
-      const targetMode = this.HeaterCooler?.getCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState).value ??
-        this.accessory.context.TargetHeaterCoolerState;
-      const command = sendQuietFeatureSwitchCommand(enabled, targetMode,
-        this.platform.Characteristic.TargetHeaterCoolerState.COOL,
-        this.platform.Characteristic.TargetHeaterCoolerState.HEAT,
-        (quietCommand) => this.sendCommand(quietCommand));
+      const command = quietFeatureSwitchCommand(enabled, this.status[commands.mode.code],
+        commands.mode.value.cool, commands.mode.value.heat);
       if (Object.keys(command).length > 0) {
+        this.sendCommand(command);
         this.platform.log.info(`[${this.getDeviceLabel()}] quietMode ->`, this.getKeyName(commands.quietMode.value,
           commands.quietMode.value.on));
       }
@@ -484,18 +482,19 @@ export class GreeAirConditioner {
       }
       return;
     }
-    const command = featureSwitchCommand(name, enabled);
     if (name === 'autoFan') {
-      const alreadyAuto = this.status[commands.speed.code] === commands.speed.value.auto &&
-        this.quietMode === commands.quietMode.value.off && this.powerfulMode === commands.powerfulMode.value.off;
-      const commandNeededBeforeStatus = !Object.hasOwn(this.status, commands.speed.code) &&
-        this.quietMode === commands.quietMode.value.off && this.powerfulMode === commands.powerfulMode.value.off;
-      this.speed = commands.speed.value.auto;
-      if (!alreadyAuto && commandNeededBeforeStatus) {
+      const command = enabled ? autoFanFeatureSwitchCommand(this.status) : {};
+      if (Object.keys(command).length > 0) {
+        this.sendCommand(command);
+      }
+    } else if (name === 'powerful') {
+      const command = turboFeatureSwitchCommand(enabled, this.status[commands.mode.code],
+        commands.mode.value.cool, commands.mode.value.heat);
+      if (Object.keys(command).length > 0) {
         this.sendCommand(command);
       }
     } else {
-      this.sendCommand(command);
+      this.sendCommand(featureSwitchCommand(name, enabled));
     }
     setTimeout(() => this.updateFeatureSwitchValue(name), 0);
   }

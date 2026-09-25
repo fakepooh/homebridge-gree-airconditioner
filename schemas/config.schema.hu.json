@@ -94,6 +94,36 @@
               "type": "boolean",
               "default": true
             },
+            "featureSwitches": {
+              "type": "object",
+              "title": "Opcionális GREE funkciókapcsolók",
+              "properties": {
+                "autoFan": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "quiet": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "powerful": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "xFan": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "health": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "light": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            },
             "temperatureSensor": {
               "type": "string",
               "required": true,
@@ -467,6 +497,45 @@
               "flex": "1 1 50%",
               "title": "Szárítás engedélyezve",
               "description": "Ha engedélyezve van, kikapcsoláskor a Szárítás funkció automatikusan aktiválódik az eszközön",
+              "condition": {
+                "functionBody": "return (model.devices && model.devices[arrayIndices] && model.devices[arrayIndices].mac && /^([a-f0-9]{12}|default|[a-f0-9]+@[a-f0-9]{12})$/.test(model.devices[arrayIndices].mac) && model.devices[arrayIndices].disabled !== true);"
+              }
+            },
+            {
+              "type": "fieldset",
+              "title": "Opcionális GREE funkciókapcsolók",
+              "items": [
+                {
+                  "key": "devices[].featureSwitches.autoFan",
+                  "title": "Automatikus ventilátor",
+                  "description": "Az automatikus ventilátorsebesség kiválasztása és megjelenítése"
+                },
+                {
+                  "key": "devices[].featureSwitches.quiet",
+                  "title": "Csendes",
+                  "description": "Pillanatnyi művelet a minimális légáramhoz; nem marad bekapcsolva"
+                },
+                {
+                  "key": "devices[].featureSwitches.powerful",
+                  "title": "Turbó",
+                  "description": "Külön kapcsoló a GREE Powerful/Turbo funkcióhoz"
+                },
+                {
+                  "key": "devices[].featureSwitches.xFan",
+                  "title": "X-Fan",
+                  "description": "Kézi X-Fan kapcsoló; az xFanEnabled automatikus működése továbbra is érvényes"
+                },
+                {
+                  "key": "devices[].featureSwitches.health",
+                  "title": "Health",
+                  "description": "GREE Health funkció"
+                },
+                {
+                  "key": "devices[].featureSwitches.light",
+                  "title": "GREE fény",
+                  "description": "GREE Lig/Light funkció"
+                }
+              ],
               "condition": {
                 "functionBody": "return (model.devices && model.devices[arrayIndices] && model.devices[arrayIndices].mac && /^([a-f0-9]{12}|default|[a-f0-9]+@[a-f0-9]{12})$/.test(model.devices[arrayIndices].mac) && model.devices[arrayIndices].disabled !== true);"
               }

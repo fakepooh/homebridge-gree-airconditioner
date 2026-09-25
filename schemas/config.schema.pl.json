@@ -94,6 +94,36 @@
               "type": "boolean",
               "default": true
             },
+            "featureSwitches": {
+              "type": "object",
+              "title": "Opcjonalne przełączniki funkcji GREE",
+              "properties": {
+                "autoFan": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "quiet": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "powerful": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "xFan": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "health": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "light": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            },
             "temperatureSensor": {
               "type": "string",
               "required": true,
@@ -467,6 +497,45 @@
               "flex": "1 1 50%",
               "title": "Włącz xFan",
               "description": "Jeśli aktywny, funkcja xFan będzie włączana automatycznie",
+              "condition": {
+                "functionBody": "return (model.devices && model.devices[arrayIndices] && model.devices[arrayIndices].mac && /^([a-f0-9]{12}|default|[a-f0-9]+@[a-f0-9]{12})$/.test(model.devices[arrayIndices].mac) && model.devices[arrayIndices].disabled !== true);"
+              }
+            },
+            {
+              "type": "fieldset",
+              "title": "Opcjonalne przełączniki funkcji GREE",
+              "items": [
+                {
+                  "key": "devices[].featureSwitches.autoFan",
+                  "title": "Automatyczny nawiew",
+                  "description": "Wybiera i pokazuje automatyczną prędkość nawiewu"
+                },
+                {
+                  "key": "devices[].featureSwitches.quiet",
+                  "title": "Cichy",
+                  "description": "Chwilowe działanie zapewniające minimalny nawiew; nie pozostaje włączone"
+                },
+                {
+                  "key": "devices[].featureSwitches.powerful",
+                  "title": "Turbo",
+                  "description": "Osobny przełącznik GREE Powerful/Turbo"
+                },
+                {
+                  "key": "devices[].featureSwitches.xFan",
+                  "title": "X-Fan",
+                  "description": "Ręczny przełącznik X-Fan; automatyczne działanie xFanEnabled nadal obowiązuje"
+                },
+                {
+                  "key": "devices[].featureSwitches.health",
+                  "title": "Health",
+                  "description": "Funkcja GREE Health"
+                },
+                {
+                  "key": "devices[].featureSwitches.light",
+                  "title": "Światło GREE",
+                  "description": "Funkcja GREE Lig/Light"
+                }
+              ],
               "condition": {
                 "functionBody": "return (model.devices && model.devices[arrayIndices] && model.devices[arrayIndices].mac && /^([a-f0-9]{12}|default|[a-f0-9]+@[a-f0-9]{12})$/.test(model.devices[arrayIndices].mac) && model.devices[arrayIndices].disabled !== true);"
               }

@@ -107,9 +107,9 @@ The optional `featureSwitches` configuration adds standard HomeKit Switch servic
 
 The device's reported status is authoritative for persistent switches. HomeKit displays the latest known status, and later status updates reconcile changes made with a remote or another app. Before a property has been reported, its switch state is unavailable.
 
-* **Auto Fan** - reports Auto only when the device reports `WdSpd=0` and Turbo is not active. Turning it on requests Auto. Turning it off sends no fan-speed command; choose a manual speed or Turbo to leave Auto.
-* **Quiet** - a momentary action that selects minimum airflow. Its switch returns to Off and does not represent a persistent Quiet state.
-* **Turbo** - controls GREE Powerful/Turbo independently from fan speed.
+* **Auto Fan** - reports Auto only after both `WdSpd` and `Tur` have been reported, and only when they are `0`. Turning it on requests `WdSpd=0` and `Tur=0`, including when either state is not yet known. Turning it off sends no fan-speed command; choose a manual speed or Turbo to leave Auto.
+* **Quiet** - a momentary action supported in the device's current Cool or Heat mode. In Auto, Fan, Dry, or an unknown mode, turning it on sends no Quiet or fan command. Its switch returns to Off and does not represent a persistent Quiet state.
+* **Turbo** - controls GREE Powerful/Turbo independently from fan speed. It can be turned on in the current Cool or Heat mode; in Auto, Fan, Dry, or an unknown mode, turning it on sends no Turbo or substitute fan command. It can always be turned off.
 * **X-Fan** - directly controls the GREE X-Fan property. The existing `xFanEnabled` option still applies: a later mode change may automatically change X-Fan. Set `xFanEnabled` to `false` if you want mode changes to leave it untouched.
 * **Health** - controls the GREE Health function.
 * **GREE Light** - controls the GREE `Lig` / Light function; the exact physical indicator behavior may vary.

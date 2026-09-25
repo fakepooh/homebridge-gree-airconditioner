@@ -45,32 +45,33 @@ export function projectAutoFan(status: Record<string, unknown>): boolean | undef
     status.WdSpd !== 4 && status.WdSpd !== 5) {
     return undefined;
   }
-  if (status.WdSpd !== 0) {
-    return false;
-  }
   if (status.Tur !== 0 && status.Tur !== 1) {
     return undefined;
   }
-  return status.Tur === 0;
+  return status.WdSpd === 0 && status.Tur === 0;
+}
+
+export function autoFanFeatureSwitchCommand(status: Record<string, unknown>): Record<string, number> {
+  return status.WdSpd === 0 && status.Tur === 0 ? {} : { WdSpd: 0, Tur: 0 };
 }
 
 export function quietFeatureSwitchCommand(
   enabled: boolean,
-  targetMode: number | undefined,
+  reportedMode: unknown,
   coolMode: number,
   heatMode: number,
 ): Record<string, number> {
-  return enabled && (targetMode === coolMode || targetMode === heatMode) ? { Quiet: 2 } : {};
+  return enabled && (reportedMode === coolMode || reportedMode === heatMode) ? { Quiet: 2 } : {};
 }
 
 export function sendQuietFeatureSwitchCommand(
   enabled: boolean,
-  targetMode: number | undefined,
+  reportedMode: unknown,
   coolMode: number,
   heatMode: number,
   sendCommand: (command: Record<string, number>) => void,
 ): Record<string, number> {
-  const command = quietFeatureSwitchCommand(enabled, targetMode, coolMode, heatMode);
+  const command = quietFeatureSwitchCommand(enabled, reportedMode, coolMode, heatMode);
   if (Object.keys(command).length > 0) {
     sendCommand(command);
   }
@@ -120,7 +121,7 @@ export function projectFeatureSwitch(name: FeatureSwitchName, status: Record<str
 export function featureSwitchCommand(name: FeatureSwitchName, enabled: boolean): Record<string, number> {
   switch (name) {
   case 'autoFan':
-    return enabled ? { WdSpd: 0, Quiet: 0, Tur: 0 } : {};
+    return enabled ? { WdSpd: 0, Tur: 0 } : {};
   case 'quiet':
     return enabled ? { Quiet: 2 } : {};
   case 'powerful':
@@ -132,4 +133,16 @@ export function featureSwitchCommand(name: FeatureSwitchName, enabled: boolean):
   case 'light':
     return { Lig: enabled ? 1 : 0 };
   }
+}
+
+export function turboFeatureSwitchCommand(
+  enabled: boolean,
+  reportedMode: unknown,
+  coolMode: number,
+  heatMode: number,
+): Record<string, number> {
+  if (enabled && reportedMode !== coolMode && reportedMode !== heatMode) {
+    return {};
+  }
+  return featureSwitchCommand('powerful', enabled);
 }

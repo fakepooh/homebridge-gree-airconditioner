@@ -6,12 +6,14 @@ import {
   FEATURE_SWITCHES,
   FEATURE_SWITCH_DEFAULTS,
   FEATURE_SWITCH_SERVICES,
+  autoFanFeatureSwitchCommand,
   featureSwitchCommand,
   mergeFeatureSwitchConfig,
   projectFeatureSwitch,
   quietFeatureSwitchCommand,
   sendQuietFeatureSwitchCommand,
   turboRotationSpeedProjection,
+  turboFeatureSwitchCommand,
   xFanModeCommand,
 } from '../dist/featureSwitches.js';
 import { DEFAULT_DEVICE_CONFIG } from '../dist/settings.js';
@@ -24,6 +26,20 @@ test('Auto Fan reflects only explicitly reported Auto speed and gives Turbo prec
   }
   assert.equal(projectFeatureSwitch('autoFan', { Tur: 0 }), undefined);
   assert.equal(projectFeatureSwitch('autoFan', { WdSpd: 0 }), undefined);
+  assert.equal(projectFeatureSwitch('autoFan', { WdSpd: 1 }), undefined);
+  assert.equal(projectFeatureSwitch('autoFan', { WdSpd: 1, Tur: undefined }), undefined);
+  assert.equal(projectFeatureSwitch('autoFan', { WdSpd: 6, Tur: 0 }), undefined);
+  assert.equal(projectFeatureSwitch('autoFan', { WdSpd: 0, Tur: 2 }), undefined);
+  for (const turbo of [0, 1]) {
+    assert.equal(projectFeatureSwitch('autoFan', { Tur: turbo }), undefined);
+  }
+  assert.equal(projectFeatureSwitch('autoFan', { WdSpd: 1, Tur: 1 }), false);
+  assert.deepEqual(autoFanFeatureSwitchCommand({ WdSpd: 0, Tur: 0 }), {});
+  assert.deepEqual(autoFanFeatureSwitchCommand({ WdSpd: 0 }), { WdSpd: 0, Tur: 0 });
+  assert.deepEqual(autoFanFeatureSwitchCommand({ WdSpd: 1, Tur: 0 }), { WdSpd: 0, Tur: 0 });
+  assert.deepEqual(autoFanFeatureSwitchCommand({ WdSpd: 0, Tur: 1 }), { WdSpd: 0, Tur: 0 });
+  assert.deepEqual(featureSwitchCommand('autoFan', true), { WdSpd: 0, Tur: 0 });
+  assert.deepEqual(featureSwitchCommand('autoFan', false), {});
 });
 
 test('Quiet is a momentary action, is mode-gated, and OFF requests no command', () => {
@@ -31,9 +47,12 @@ test('Quiet is a momentary action, is mode-gated, and OFF requests no command', 
   assert.equal(projectFeatureSwitch('quiet', { Quiet: 2, WdSpd: 1 }), false);
   assert.deepEqual(featureSwitchCommand('quiet', true), { Quiet: 2 });
   assert.deepEqual(featureSwitchCommand('quiet', false), {});
-  assert.deepEqual(quietFeatureSwitchCommand(true, 2, 2, 3), { Quiet: 2 });
-  assert.deepEqual(quietFeatureSwitchCommand(true, 1, 2, 3), {});
-  assert.deepEqual(quietFeatureSwitchCommand(false, 2, 2, 3), {});
+  assert.deepEqual(quietFeatureSwitchCommand(true, 1, 1, 4), { Quiet: 2 });
+  assert.deepEqual(quietFeatureSwitchCommand(true, 4, 1, 4), { Quiet: 2 });
+  for (const mode of [0, 2, 3, undefined, 99]) {
+    assert.deepEqual(quietFeatureSwitchCommand(true, mode, 1, 4), {});
+  }
+  assert.deepEqual(quietFeatureSwitchCommand(false, 1, 1, 4), {});
   assert.deepEqual(projectFeatureSwitch('quiet', { Quiet: 2 }), false);
 });
 
@@ -45,8 +64,8 @@ test('repeated Quiet actions each send Quiet=2 despite an acknowledgement awaiti
     status.Quiet = 2; // Simulate the acknowledgement before the next tap.
   };
 
-  sendQuietFeatureSwitchCommand(true, 2, 2, 3, sendCommand);
-  sendQuietFeatureSwitchCommand(true, 2, 2, 3, sendCommand);
+  sendQuietFeatureSwitchCommand(true, 1, 1, 4, sendCommand);
+  sendQuietFeatureSwitchCommand(true, 1, 1, 4, sendCommand);
   assert.deepEqual(commands, [{ Quiet: 2 }, { Quiet: 2 }]);
   // Any delayed reconciliation projects the momentary switch OFF from current status.
   assert.equal(projectFeatureSwitch('quiet', status), false);
@@ -71,6 +90,17 @@ test('Turbo changes Tur only and projects reported state', () => {
   assert.equal(projectFeatureSwitch('powerful', {}), undefined);
   assert.deepEqual(featureSwitchCommand('powerful', true), { Tur: 1 });
   assert.deepEqual(featureSwitchCommand('powerful', false), { Tur: 0 });
+});
+
+test('Turbo ON is gated by the reported GREE mode while OFF always clears Tur', () => {
+  assert.deepEqual(turboFeatureSwitchCommand(true, 1, 1, 4), { Tur: 1 });
+  assert.deepEqual(turboFeatureSwitchCommand(true, 4, 1, 4), { Tur: 1 });
+  for (const mode of [0, 2, 3, undefined, 99]) {
+    assert.deepEqual(turboFeatureSwitchCommand(true, mode, 1, 4), {});
+  }
+  for (const mode of [0, 1, 2, 3, 4, undefined, 99]) {
+    assert.deepEqual(turboFeatureSwitchCommand(false, mode, 1, 4), { Tur: 0 });
+  }
 });
 
 test('X-Fan, Health, and Light project raw values and write only their own property', () => {

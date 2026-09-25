@@ -94,6 +94,36 @@
               "type": "boolean",
               "default": true
             },
+            "featureSwitches": {
+              "type": "object",
+              "title": "Interruptores opcionales de funciones GREE",
+              "properties": {
+                "autoFan": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "quiet": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "powerful": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "xFan": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "health": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "light": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            },
             "temperatureSensor": {
               "type": "string",
               "required": true,
@@ -467,6 +497,45 @@
               "flex": "1 1 50%",
               "title": "Secar activado",
               "description": "Si está activada, la función Secar se activa automáticamente en el dispositivo al apagarse",
+              "condition": {
+                "functionBody": "return (model.devices && model.devices[arrayIndices] && model.devices[arrayIndices].mac && /^([a-f0-9]{12}|default|[a-f0-9]+@[a-f0-9]{12})$/.test(model.devices[arrayIndices].mac) && model.devices[arrayIndices].disabled !== true);"
+              }
+            },
+            {
+              "type": "fieldset",
+              "title": "Interruptores opcionales de funciones GREE",
+              "items": [
+                {
+                  "key": "devices[].featureSwitches.autoFan",
+                  "title": "Ventilador automático",
+                  "description": "Selecciona y muestra la velocidad automática del ventilador"
+                },
+                {
+                  "key": "devices[].featureSwitches.quiet",
+                  "title": "Silencioso",
+                  "description": "Acción momentánea para un flujo de aire mínimo; no permanece activado"
+                },
+                {
+                  "key": "devices[].featureSwitches.powerful",
+                  "title": "Turbo",
+                  "description": "Interruptor independiente para GREE Powerful/Turbo"
+                },
+                {
+                  "key": "devices[].featureSwitches.xFan",
+                  "title": "X-Fan",
+                  "description": "Interruptor manual X-Fan; también se aplica el comportamiento automático de xFanEnabled"
+                },
+                {
+                  "key": "devices[].featureSwitches.health",
+                  "title": "Health",
+                  "description": "Función Health de GREE"
+                },
+                {
+                  "key": "devices[].featureSwitches.light",
+                  "title": "Luz GREE",
+                  "description": "Función GREE Lig/Light"
+                }
+              ],
               "condition": {
                 "functionBody": "return (model.devices && model.devices[arrayIndices] && model.devices[arrayIndices].mac && /^([a-f0-9]{12}|default|[a-f0-9]+@[a-f0-9]{12})$/.test(model.devices[arrayIndices].mac) && model.devices[arrayIndices].disabled !== true);"
               }
