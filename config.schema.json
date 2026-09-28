@@ -514,7 +514,7 @@
                 },
                 {
                   "key": "devices[].featureSwitches.light",
-                  "title": "GREE Light",
+                  "title": "Light",
                   "description": "GREE Lig/Light function"
                 }
               ]

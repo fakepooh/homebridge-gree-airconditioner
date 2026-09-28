@@ -19,7 +19,7 @@ export const FEATURE_SWITCH_SERVICES: Record<FeatureSwitchName, { displayName: s
   powerful: { displayName: 'Turbo', subtype: 'gree-feature-turbo' },
   xFan: { displayName: 'X-Fan', subtype: 'gree-feature-x-fan' },
   health: { displayName: 'Health', subtype: 'gree-feature-health' },
-  light: { displayName: 'GREE Light', subtype: 'gree-feature-light' },
+  light: { displayName: 'Light', subtype: 'gree-feature-light' },
 };
 
 export function mergeFeatureSwitchConfig(

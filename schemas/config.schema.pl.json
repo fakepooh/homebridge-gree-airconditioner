@@ -532,7 +532,7 @@
                 },
                 {
                   "key": "devices[].featureSwitches.light",
-                  "title": "Światło GREE",
+                  "title": "Światło",
                   "description": "Funkcja GREE Lig/Light"
                 }
               ],

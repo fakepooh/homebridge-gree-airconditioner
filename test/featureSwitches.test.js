@@ -155,7 +155,7 @@ test('optional services have stable unique subtypes', () => {
   const subtypes = FEATURE_SWITCHES.map((name) => FEATURE_SWITCH_SERVICES[name].subtype);
   assert.equal(new Set(subtypes).size, FEATURE_SWITCHES.length);
   assert.equal(FEATURE_SWITCH_SERVICES.powerful.displayName, 'Turbo');
-  assert.equal(FEATURE_SWITCH_SERVICES.light.displayName, 'GREE Light');
+  assert.equal(FEATURE_SWITCH_SERVICES.light.displayName, 'Light');
 });
 
 test('npm test runs a fresh production build first', async () => {

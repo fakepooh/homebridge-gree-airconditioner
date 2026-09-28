@@ -532,7 +532,7 @@
                 },
                 {
                   "key": "devices[].featureSwitches.light",
-                  "title": "GREE-Licht",
+                  "title": "Licht",
                   "description": "GREE-Funktion Lig/Light"
                 }
               ],

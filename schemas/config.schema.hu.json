@@ -532,7 +532,7 @@
                 },
                 {
                   "key": "devices[].featureSwitches.light",
-                  "title": "GREE fény",
+                  "title": "Fény",
                   "description": "GREE Lig/Light funkció"
                 }
               ],

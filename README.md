@@ -112,7 +112,7 @@ The device's reported status is authoritative for persistent switches. HomeKit d
 * **Turbo** - controls GREE Powerful/Turbo independently from fan speed. It can be turned on in the current Cool or Heat mode; in Auto, Fan, Dry, or an unknown mode, turning it on sends no Turbo or substitute fan command. It can always be turned off.
 * **X-Fan** - turns on only when the device reports Cool or Dry mode; in other or unknown modes, ON sends no command. OFF can always clear X-Fan. The existing `xFanEnabled` option still applies: a later mode change may automatically change X-Fan. Set `xFanEnabled` to `false` if you want mode changes to leave it untouched.
 * **Health** - controls the GREE Health function.
-* **GREE Light** - controls the GREE `Lig` / Light function; the exact physical indicator behavior may vary.
+* **Light** - controls the GREE `Lig` / Light function; the exact physical indicator behavior may vary.
 
 Support for these properties varies across GREE models and firmware. The plugin does not infer support from the model name. Enabling a switch creates its HomeKit service from configuration; its state remains unavailable until the device reports the relevant property. If a model never reports that property, the configured switch remains present but unavailable.
 
