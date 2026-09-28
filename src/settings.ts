@@ -1,4 +1,6 @@
 import commands from './commands.js';
+import { FEATURE_SWITCH_DEFAULTS } from './featureSwitches.js';
+import type { FeatureSwitchConfig } from './featureSwitches.js';
 /**
  * This is the name of the platform that users will use to register the plugin in the Homebridge config.json
  */
@@ -43,6 +45,7 @@ export interface DeviceConfig {
   minimumTargetTemperature: number;
   maximumTargetTemperature: number;
   xFanEnabled: boolean;
+  featureSwitches?: FeatureSwitchConfig;
   temperatureSensor: string;
   temperatureStepSize?: number;
   disabled?: boolean;
@@ -73,6 +76,7 @@ export const DEFAULT_DEVICE_CONFIG: DefaultDeviceConfig = {
   minimumTargetTemperature: 16,
   maximumTargetTemperature: 30,
   xFanEnabled: true,
+  featureSwitches: FEATURE_SWITCH_DEFAULTS,
   temperatureSensor: TS_TYPE.disabled,
   temperatureStepSize: TEMPERATURE_STEPS.fahrenheit,
   defaultVerticalSwing: commands.swingVertical.value.default,
