@@ -49,6 +49,7 @@ export interface DeviceConfig {
   temperatureSensor: string;
   temperatureStepSize?: number;
   disabled?: boolean;
+  verticalSwingPositionControl?: boolean;
   defaultVerticalSwing?: number;
   defaultFanVerticalSwing?: number;
   overrideDefaultVerticalSwing?: number; // deprecated, new parameter: modifyVerticalSwingPosition

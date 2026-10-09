@@ -1,4 +1,5 @@
 import dgram from 'dgram';
+import type { DeviceSession } from './deviceSession.js';
 import type { CharacteristicValue, Service } from 'homebridge';
 
 import type { GreeACPlatform, MyPlatformAccessory } from './platform.js';
@@ -22,8 +23,10 @@ export class GreeAirConditioner {
   private HeaterCooler?: Service;
   private TemperatureSensor?: Service;
   private Fan?: Service;
+  private VerticalSwingPosition?: Service;
   private featureSwitchServices: Partial<Record<FeatureSwitchName, Service>> = {};
   public key?: string;
+  public session?: DeviceSession;
   private cols?: Array<string>;
   private status: { [key: string]: unknown };
   private tsAccessory: GreeAirConditionerTS | null = null;
@@ -219,6 +222,15 @@ export class GreeAirConditioner {
     this.Fan?.setPrimaryService(false);
 
     this.initFeatureSwitchServices();
+    const swingSubtype = 'gree-vertical-swing-position';
+    this.VerticalSwingPosition = this.accessory.getServiceById(this.platform.Service.WindowCovering, swingSubtype);
+    if (this.deviceConfig.verticalSwingPositionControl === true && !this.VerticalSwingPosition) {
+      this.VerticalSwingPosition = this.accessory.addService(this.platform.Service.WindowCovering,
+        'Шторка ' + this.accessory.displayName, swingSubtype);
+      for (const characteristic of [this.platform.Characteristic.CurrentPosition, this.platform.Characteristic.TargetPosition]) {
+        this.VerticalSwingPosition.getCharacteristic(characteristic).setProps({ minStep: 25 });
+      }
+    }
 
     this.platform.api.updatePlatformAccessories([this.accessory]);
 
@@ -274,6 +286,14 @@ export class GreeAirConditioner {
     this.Fan?.getCharacteristic(this.platform.Characteristic.SwingMode)
       .onGet(this.getSwingMode.bind(this))
       .onSet(this.setFanSwingMode.bind(this));
+
+    this.VerticalSwingPosition?.getCharacteristic(this.platform.Characteristic.CurrentPosition)
+      .onGet(this.getVerticalSwingPosition.bind(this));
+    this.VerticalSwingPosition?.getCharacteristic(this.platform.Characteristic.TargetPosition)
+      .onGet(this.getVerticalSwingPosition.bind(this))
+      .onSet(this.setVerticalSwingPosition.bind(this));
+    this.VerticalSwingPosition?.getCharacteristic(this.platform.Characteristic.PositionState)
+      .onGet(() => this.platform.Characteristic.PositionState.STOPPED);
 
     // register handlers for the Rotation Speed Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.RotationSpeed)
@@ -361,6 +381,21 @@ export class GreeAirConditioner {
       ` (Position: ${this.getKeyName(commands.swingVertical.value, this.swingMode)})` : ''));
   }
 
+  getVerticalSwingPosition() {
+    const positions = [commands.swingVertical.value.fixedHighest, commands.swingVertical.value.fixedHigher,
+      commands.swingVertical.value.fixedMiddle, commands.swingVertical.value.fixedLower, commands.swingVertical.value.fixedLowest];
+    const index = positions.indexOf(this.swingMode);
+    return index < 0 ? 0 : index * 25;
+  }
+
+  async setVerticalSwingPosition(value: CharacteristicValue) {
+    const positions = [commands.swingVertical.value.fixedHighest, commands.swingVertical.value.fixedHigher,
+      commands.swingVertical.value.fixedMiddle, commands.swingVertical.value.fixedLower, commands.swingVertical.value.fixedLowest];
+    const index = Math.max(0, Math.min(4, Math.round(Number(value) / 25)));
+    this.platform.log.debug(`[${this.getDeviceLabel()}] Set VerticalSwingPosition ->`, index * 25);
+    this.swingMode = positions[index];
+  }
+
   async setFanSwingMode(value: CharacteristicValue) {
     const logValue = (value === this.platform.Characteristic.SwingMode.SWING_ENABLED) ? 'ENABLED' : 'DISABLED';
     this.swingMode = (value === this.platform.Characteristic.SwingMode.SWING_ENABLED) ?
@@ -442,9 +477,25 @@ export class GreeAirConditioner {
       const { displayName, subtype } = FEATURE_SWITCH_SERVICES[name];
       const cached = this.accessory.getServiceById(this.platform.Service.Switch, subtype);
       if (configured[name]) {
-        this.featureSwitchServices[name] = cached ||
+        const service = cached ||
           this.accessory.addService(this.platform.Service.Switch, displayName, subtype);
-        this.featureSwitchServices[name]?.setCharacteristic(this.platform.Characteristic.Name, displayName);
+        this.featureSwitchServices[name] = service;
+        service.setCharacteristic(this.platform.Characteristic.Name, displayName);
+        if (!service.testCharacteristic(this.platform.Characteristic.ConfiguredName)) {
+          service.addOptionalCharacteristic(this.platform.Characteristic.ConfiguredName);
+        }
+        const configuredName = service.getCharacteristic(this.platform.Characteristic.ConfiguredName);
+        // Seed only missing names; cached HomeKit names must survive initialization.
+        if (typeof configuredName.value !== 'string' || configuredName.value.trim() === '') {
+          configuredName.updateValue(displayName);
+        }
+        configuredName.onSet((value) => {
+          if (typeof value !== 'string' || value.trim() === '') {
+            throw new Error('Feature switch name cannot be empty');
+          }
+          configuredName.updateValue(value);
+          this.platform.api.updatePlatformAccessories([this.accessory]);
+        });
       } else if (cached) {
         this.accessory.removeService(cached);
       }
@@ -1635,6 +1686,14 @@ export class GreeAirConditioner {
       this.HeaterCooler?.getCharacteristic(this.platform.Characteristic.SwingMode)
         .updateValue(swing);
     }
+    if (props.includes(commands.swingVertical.code) && this.VerticalSwingPosition) {
+      const position = this.getVerticalSwingPosition();
+      this.VerticalSwingPosition.getCharacteristic(this.platform.Characteristic.CurrentPosition).updateValue(position);
+      this.VerticalSwingPosition.getCharacteristic(this.platform.Characteristic.TargetPosition).updateValue(position);
+      this.VerticalSwingPosition.getCharacteristic(this.platform.Characteristic.PositionState)
+        .updateValue(this.platform.Characteristic.PositionState.STOPPED);
+    }
+
     // Heater-Cooler Rotation Speed
     if (hcActive) {
       const maxSpeed = this.HeaterCooler?.getCharacteristic(this.platform.Characteristic.RotationSpeed).props.maxValue ||
@@ -1750,7 +1809,7 @@ export class GreeAirConditioner {
         this.platform.log.warn(`[${this.getDeviceLabel()}] Warning: handleMessage - Unknown response from device`);
         return;
       }
-      this.platform.log.debug(`[${this.getDeviceLabel()}] handleMessage - Package -> %j`, pack);
+      this.platform.log.debug(`[${this.getDeviceLabel()}] handleMessage - Package -> %j`, { ...pack, key: undefined });
       switch ((pack.t as string).toLowerCase()) {
       case 'bindok': // package type is binding confirmation
         this.platform.log.warn(`[${this.getDeviceLabel()}] Warning: Binding response received from already bound device`);
@@ -1875,11 +1934,17 @@ export class GreeAirConditioner {
     try {
       const msg = JSON.stringify(payload);
       this.platform.log.debug(`[${this.getDeviceLabel()}] sendMessage`, msg);
-      this.socket.send(
-        msg,
-        this.accessory.context.device.port,
-        this.accessory.context.device.address,
-      );
+      this.socket.send(msg, this.accessory.context.device.port, this.accessory.context.device.address, (error) => {
+        if (error) {
+          this.platform.log.error(`[${this.getDeviceLabel()}] UDP send failed: type=%s destination=%s:%s encryption=%s code=%s`,
+            (message as { t?: string }).t, this.accessory.context.device.address, this.accessory.context.device.port,
+            this.accessory.context.device.encryptionVersion, (error as NodeJS.ErrnoException).code || error.message);
+          if (['EHOSTUNREACH', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code || '')) {
+            this.platform.log.warn(`[${this.getDeviceLabel()}] Check host routing and this Homebridge process's Local Network permission`);
+          }
+          this.session?.transportFailed();
+        }
+      });
     } catch (err) {
       this.platform.log.error(`[${this.getDeviceLabel()}] sendMessage - Error:`, (err as Error).message);
     }
