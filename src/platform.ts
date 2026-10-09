@@ -841,6 +841,7 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
       const encryptionVersion = message.tag === undefined ? 1 : 2;
       const pack = encryptionVersion === 1 ? crypto.decrypt_v1(message.pack, message.i === 1 ? undefined : ac.key) :
         crypto.decrypt_v2(message.pack, message.tag, message.i === 1 ? undefined : ac.key);
+      const responseValues = pack.p === undefined ? pack.val : pack.p;
       if (pack.t === 'bindok' && !ac.accessory.bound && typeof pack.key === 'string' && pack.key.length === 16 &&
         pack.mac === device.mac) {
         ac.key = pack.key;
@@ -868,8 +869,10 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
             this.statusSequences[device.mac], now, ac.deviceConfig.statusUpdateInterval);
           this.statusLogTimes[device.mac] = now;
         }
-      } else if (pack.t === 'res' && ac.accessory.bound && Array.isArray(pack.opt) &&
-        Array.isArray(pack.p || pack.val) && pack.opt.length === (pack.p || pack.val).length) {
+      } else if (pack.t === 'res' && ac.accessory.bound && ac.session?.isReady() && ac.key !== undefined && message.i !== 1 &&
+        Array.isArray(pack.opt) && pack.opt.length > 0 && Array.isArray(responseValues) &&
+        pack.opt.length === responseValues.length && pack.opt.every((opt: unknown) => typeof opt === 'string') &&
+        responseValues.every((value: unknown) => typeof value === 'number' && Number.isFinite(value))) {
         ac.handleMessage(msg, rinfo);
       }
     } catch (error) {

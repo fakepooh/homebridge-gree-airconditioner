@@ -89,3 +89,27 @@ test('real full status permits the device time string and unsupported null field
   assert.equal(f.ac.accessory.bound, true);
   assert.equal(f.updates(), 1);
 });
+
+for (const version of [1, 2]) {
+  test(`command responses require the session key and typed values (protocol ${version})`, (t) => {
+    const f = fixture(t);
+    f.send({ t: 'bindok', mac, key }, false, rinfo, version);
+    f.send({ t: 'dat', mac, cols: ['Pow'], dat: [0] }, true, rinfo, version);
+    assert.equal(f.updates(), 1);
+    // An otherwise valid acknowledgement encrypted with the public bind key is untrusted.
+    f.send({ t: 'res', opt: ['Pow'], val: [1] }, false, rinfo, version);
+    for (const pack of [
+      { opt: ['Pow'], val: [] }, { opt: [7], val: [1] },
+      { opt: ['Pow'], val: ['1'] }, { opt: ['Pow'], val: [null] },
+      { opt: ['Pow'], val: [{}] }, { opt: [], val: [] },
+      { opt: ['Pow'], p: null, val: [1] }, { opt: ['Pow'], p: [], val: [1] },
+    ]) {
+      f.send({ t: 'res', ...pack }, true, rinfo, version);
+    }
+    assert.equal(f.updates(), 1);
+    f.send({ t: 'res', opt: ['Pow'], val: [1] }, true, rinfo, version);
+    f.send({ t: 'res', opt: ['Mod'], p: [4] }, true, rinfo, version);
+    assert.equal(f.updates(), 3);
+    assert.ok(!JSON.stringify(f.logs).includes(key));
+  });
+}

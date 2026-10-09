@@ -23,6 +23,10 @@ export class DeviceSession {
     this.retryBind();
   }
 
+  isReady() {
+    return this.phase === 'ready';
+  }
+
   private schedule(action: () => void, delay: number) {
     clearTimeout(this.timer);
     this.timer = setTimeout(action, delay);

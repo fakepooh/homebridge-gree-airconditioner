@@ -239,10 +239,10 @@ export class GreeAirConditioner {
 
     // register handlers for the Active Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.Active)
-      .onSet(this.setActive.bind(this))
+      .onSet(this.guardedWrite(this.setActive))
       .onGet(this.getActive.bind(this));
     this.Fan?.getCharacteristic(this.platform.Characteristic.Active)
-      .onSet(this.setFanActive.bind(this))
+      .onSet(this.guardedWrite(this.setFanActive))
       .onGet(this.getFanActive.bind(this));
 
     // register handlers for the Current Heater-Cooler State Characteristic
@@ -256,7 +256,7 @@ export class GreeAirConditioner {
     // register handlers for the Target Heater-Cooler State Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState)
       .onGet(this.getTargetHeaterCoolerState.bind(this))
-      .onSet(this.setTargetHeaterCoolerState.bind(this));
+      .onSet(this.guardedWrite(this.setTargetHeaterCoolerState));
 
     // register handlers for the Current Temperature Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.CurrentTemperature)
@@ -267,47 +267,47 @@ export class GreeAirConditioner {
     // register handlers for the Cooling Threshold Temperature Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
       .onGet(this.getTargetTemperature.bind(this, 'CoolingThresholdTemperature'))
-      .onSet(this.setTargetTemperature.bind(this));
+      .onSet(this.guardedWrite(this.setTargetTemperature));
 
     // register handlers for the Heating Threshold Temperature Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
       .onGet(this.getTargetTemperature.bind(this, 'HeatingThresholdTemperature'))
-      .onSet(this.setTargetTemperature.bind(this));
+      .onSet(this.guardedWrite(this.setTargetTemperature));
 
     // register handlers for the Temperature Display Units Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits)
       .onGet(this.getTemperatureDisplayUnits.bind(this))
-      .onSet(this.setTemperatureDisplayUnits.bind(this));
+      .onSet(this.guardedWrite(this.setTemperatureDisplayUnits));
 
     // register handlers for the Swing Mode Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.SwingMode)
       .onGet(this.getSwingMode.bind(this))
-      .onSet(this.setSwingMode.bind(this));
+      .onSet(this.guardedWrite(this.setSwingMode));
     this.Fan?.getCharacteristic(this.platform.Characteristic.SwingMode)
       .onGet(this.getSwingMode.bind(this))
-      .onSet(this.setFanSwingMode.bind(this));
+      .onSet(this.guardedWrite(this.setFanSwingMode));
 
     this.VerticalSwingPosition?.getCharacteristic(this.platform.Characteristic.CurrentPosition)
       .onGet(this.getVerticalSwingPosition.bind(this));
     this.VerticalSwingPosition?.getCharacteristic(this.platform.Characteristic.TargetPosition)
       .onGet(this.getVerticalSwingPosition.bind(this))
-      .onSet(this.setVerticalSwingPosition.bind(this));
+      .onSet(this.guardedWrite(this.setVerticalSwingPosition));
     this.VerticalSwingPosition?.getCharacteristic(this.platform.Characteristic.PositionState)
       .onGet(() => this.platform.Characteristic.PositionState.STOPPED);
 
     // register handlers for the Rotation Speed Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.RotationSpeed)
       .onGet(this.getRotationSpeed.bind(this))
-      .onSet(this.setRotationSpeed.bind(this));
+      .onSet(this.guardedWrite(this.setRotationSpeed));
     this.Fan?.getCharacteristic(this.platform.Characteristic.RotationSpeed)
       .onGet(this.getFanRotationSpeed.bind(this))
-      .onSet(this.setFanRotationSpeed.bind(this));
+      .onSet(this.guardedWrite(this.setFanRotationSpeed));
 
     for (const name of FEATURE_SWITCHES) {
       const service = this.featureSwitchServices[name];
       service?.getCharacteristic(this.platform.Characteristic.On)
         .onGet(() => this.getFeatureSwitch(name))
-        .onSet((value) => this.setFeatureSwitch(name, value === true));
+        .onSet(this.guardedWrite((value) => this.setFeatureSwitch(name, value === true)));
     }
 
     // register handlers for the Name Characteristic
@@ -1897,7 +1897,24 @@ export class GreeAirConditioner {
     }
   };
 
+  private requireReadyForCommand() {
+    if (!this.accessory.bound || this.key === undefined || (this.session && !this.session.isReady())) {
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+  }
+
+  private guardedWrite(handler: (value: CharacteristicValue) => void | Promise<void>) {
+    return (value: CharacteristicValue) => {
+      // Reject before a setter changes cached preferences or skips a matching old value.
+      this.requireReadyForCommand();
+      return handler.call(this, value);
+    };
+  }
+
   sendMessage(message: unknown) {
+    if ((message as { t?: string }).t === 'cmd') {
+      this.requireReadyForCommand();
+    }
     this.platform.log.debug(`[${this.getDeviceLabel()}] sendMessage - Package -> %j`, message);
     this.platform.log.debug(`[${this.getDeviceLabel()}] sendMessage -> Encryption version: %i`,
       this.accessory.context.device.encryptionVersion);
@@ -1951,6 +1968,8 @@ export class GreeAirConditioner {
   }
 
   sendCommand(cmd: Record<string, unknown>) {
+    // Do not latch pending power/mode or send with the generic bind key during recovery.
+    this.requireReadyForCommand();
     if (this.isSilentTime()) {
       // add buzzer off command if current time is in silent time range
       cmd[commands.buzzer.code] = commands.buzzer.value.off;
