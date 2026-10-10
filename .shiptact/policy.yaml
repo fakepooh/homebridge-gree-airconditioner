@@ -1,0 +1,10 @@
+# ShipTact-managed project policy overrides.
+{
+  "verification": {
+    "require_existing_ci": true,
+    "authoritative_ci": [
+      { "name": "build (22.x)", "workflow": "Build and Lint" },
+      { "name": "build (24.x)", "workflow": "Build and Lint" }
+    ]
+  }
+}
