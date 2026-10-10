@@ -1,4 +1,5 @@
-import dgram, { Socket } from 'dgram';
+import dgram from 'dgram';
+import { DeviceSession } from './deviceSession.js';
 import crypto from './crypto.js';
 import type { API, Characteristic, DynamicPlatformPlugin, Logging, PlatformAccessory, PlatformConfig, Service } from 'homebridge';
 import { Categories } from 'homebridge';
@@ -10,6 +11,7 @@ import { PLATFORM_NAME, PLUGIN_NAME, UDP_SCAN_PORT, DEFAULT_DEVICE_CONFIG, MODIF
   DEF_SCAN_INTERVAL, TEMPERATURE_LIMITS, TEMPERATURE_STEPS, BINDING_TIMEOUT } from './settings.js';
 
 import commands from './commands.js';
+import { mergeFeatureSwitchConfig } from './featureSwitches.js';
 import { version } from './version.js';
 
 // This is only required when using Custom Services and Characteristics not support by HomeKit
@@ -40,6 +42,11 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
   private pluginAddresses: Record<string, string> = {};
   public ports: number[] = [];
   private tempUnit: string;
+  private handlers: Record<string, GreeAirConditioner> = {};
+  private initialized = new Set<string>();
+  private statusLogTimes: Record<string, number> = {};
+  private statusSequences: Record<string, number> = {};
+  private scanTimer?: ReturnType<typeof setInterval>;
 
   // This is only required when using Custom Services and Characteristics not support by HomeKit
    
@@ -102,6 +109,12 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
     // Dynamic Platform plugins should only register new accessories after this event was fired,
     // in order to ensure they weren't added to homebridge already. This event can also be used
     // to start discovery of new accessories.
+    this.api.on('shutdown', () => {
+      clearInterval(this.scanTimer);
+      for (const ac of Object.values(this.handlers)) {
+        ac.session?.close();
+      }
+    });
     this.api.on('didFinishLaunching', () => {
       log.debug('Executing didFinishLaunching callback');
       if (Object.entries(this.pluginAddresses).length === 0) {
@@ -151,7 +164,7 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
     this.ports.push(this.socket.address().port);
     this.socket.setBroadcast(true); // always enable broadcast on socket (even if broadcast is disabled by config; this is the fallback)
     this.sendScan();
-    setInterval(() => {
+    this.scanTimer = setInterval(() => {
       this.sendScan();
     }, (this.config.scanInterval || DEF_SCAN_INTERVAL) * 1000); // scanInterval in seconds (default = 60 sec)
   }
@@ -192,7 +205,7 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
         pack = crypto.decrypt_v2(message.pack, message.tag, message.i === 1 ? undefined : this.bridges[rinfo.address]?.key);
         encryptionVersion = 2;
       }
-      this.log.debug('handleMessage - Package -> %j', pack);
+      this.log.debug('handleMessage - Package -> %j', { ...pack, key: undefined });
       if (encryptionVersion === 1 && pack.t === 'dev' && pack.ver && !pack.ver.toString().startsWith('V1.')) {
         // some devices respond to scan command with V1 encryption but binding requires V2 encryption
         // we set encryption to V2 if device version is not V1.x
@@ -377,13 +390,15 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
         { encryptionVersion: DEFAULT_DEVICE_CONFIG.encryptionVersion } : {}),
     };
     // assign customized default to missing parameters
-    Object.entries(this.config.devices?.find((item: { mac?: string, disabled?: boolean }) => item.mac?.toLowerCase() === 'default' &&
-      !item?.disabled) || {})
+    const defaultDeviceConfig = this.config.devices?.find((item: { mac?: string, disabled?: boolean }) =>
+      item.mac?.toLowerCase() === 'default' && !item?.disabled);
+    Object.entries(defaultDeviceConfig || {})
       .forEach(([key, value]) => {
-        if (!['mac', 'name', 'ip', 'port', 'disabled'].includes(key) && deviceConfig[key] === undefined) {
+        if (!['mac', 'name', 'ip', 'port', 'disabled', 'featureSwitches'].includes(key) && deviceConfig[key] === undefined) {
           deviceConfig[key] = value;
         }
       });
+    deviceConfig.featureSwitches = mergeFeatureSwitchConfig(defaultDeviceConfig?.featureSwitches, devcfg.featureSwitches);
     // try to assign temperatureStepSize from Homebridge UI if missing in configuration
     if (deviceConfig.temperatureStepSize === undefined && this.tempUnit === 'c') {
       deviceConfig.temperatureStepSize = TEMPERATURE_STEPS.celsius;
@@ -539,6 +554,9 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
         accessory.context.device.address, deviceInfo.address);
       accessory.context.device.address = deviceInfo.address;
     }
+    if (accessory) {
+      accessory.context.device.port = deviceInfo.port;
+    }
     if (accessory_ts && deviceInfo.address !== accessory_ts.context.device.address) {
       accessory_ts.context.device.address = deviceInfo.address;
     }
@@ -609,12 +627,23 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
       acsocket.on('error', (err) => {
         this.log.error(`[${ac.getDeviceLabel()}] Network - Error:`, err.message);
       });
-      if (!ac.accessory.context.device.mac.includes('@')) {
-        // normal device -> bind now
-        acsocket.on('message', this.handleACMessage.bind(this, ac, acsocket));
+      this.handlers[deviceInfo.mac] = ac;
+      if (!deviceInfo.mac.includes('@')) {
+        ac.session = new DeviceSession(ac.deviceConfig.statusUpdateInterval * 1000,
+          (alternate) => {
+            ac.key = undefined;
+            if (alternate) {
+              ac.accessory.context.device.encryptionVersion = ac.accessory.context.device.encryptionVersion === 1 ? 2 : 1;
+            }
+            this.sendACBindRequest(ac);
+          }, () => ac.requestDeviceStatus(), () => {
+            ac.accessory.bound = false;
+          });
+        acsocket.on('message', (msg, rinfo) => this.handleACMessage(ac, msg, rinfo));
       }
       acsocket.on('close', () => {
-        this.log.error(`[${ac.getDeviceLabel()}] Network - Connection closed`);
+        ac.session?.close();
+        this.log.debug(`[${ac.getDeviceLabel()}] Network - Connection closed`);
       });
       if (this.ports.indexOf(deviceConfig.port || 0) >= 0) {
         this.log.warn(`[${ac.getDeviceLabel()}] Warning: Configured port (%i) is already used - replacing with auto assigned port`,
@@ -627,13 +656,12 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
         acsocket.setBroadcast(false);
         if (!ac.accessory.context.device.mac.includes('@')) {
           // normal device -> bind now
-          this.sendACBindRequest(ac);
-          setTimeout(this.checkACBindingStatus.bind(this, 1, ac), BINDING_TIMEOUT);
+          ac.session?.start();
         } else {
           // bridged device -> bridge already bound
           this.log.debug(`[${ac.getDeviceLabel()}] Device binding in progress`);
           ac.key = this.bridges[ac.accessory.context.device.address]?.key;
-          this.log.debug(`[${ac.getDeviceLabel()}] Device key ->`, ac.key);
+
           acsocket.on('message', ac.handleMessage);
           ac.accessory.bound = true;
           ac.initAccessory();
@@ -700,6 +728,12 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
         msg,
         port,
         address,
+        (error) => {
+          if (error) {
+            this.log.error(`[${address}] UDP send failed: destination=%s:%s encryption=%s code=%s`,
+              address, port, encryptionVersion, (error as NodeJS.ErrnoException).code || error.message);
+          }
+        },
       );
     } catch (err) {
       this.log.error(`[${address}] sendMessage - Error:`, (err as Error).message);
@@ -793,78 +827,57 @@ export class GreeACPlatform implements DynamicPlatformPlugin {
     ac.sendMessage(message);
   }
 
-  checkACBindingStatus(bindNo: number, ac: GreeAirConditioner) {
-    if (!ac.accessory.bound) {
-      this.log.debug(`[${ac.getDeviceLabel()}] Device binding timeout`);
-      switch (bindNo){
-      case 1:
-        // 1. timeout -> repeat bind request with alternate encryption version
-        if (ac.accessory.context.device.encryptionVersion === 1) {
-          ac.accessory.context.device.encryptionVersion = 2;
-        } else {
-          ac.accessory.context.device.encryptionVersion = 1;
-        }
-        this.sendACBindRequest(ac);
-        setTimeout(this.checkACBindingStatus.bind(this, bindNo + 1, ac), BINDING_TIMEOUT);
-        break;
-      default:
-        this.log.error(`[${ac.getDeviceLabel()}] Error: Device is not bound`,
-          '(unknown device type or device is malfunctioning [turning the power supply off and on may help])',
-          '- Restart homebridge when issue has fixed!');
-        break;
-      }
+  handleACMessage = (ac: GreeAirConditioner, msg: Buffer,
+    rinfo: { address: string, family: string, port: number, size: number }) => {
+    const device = ac.accessory.context.device;
+    if (device.address !== rinfo.address || device.port !== rinfo.port) {
+      return;
     }
-  }
-
-  handleACMessage = (ac: GreeAirConditioner, socket: Socket, msg: Buffer,
-    rinfo: {address: string, family: string, port: number, size: number}) => {
-    if (ac.accessory.context.device.address === rinfo.address) {
-      this.log.debug(`[${ac.getDeviceLabel()}] handleMessage -> %s`, msg.toString());
+    try {
       const message = JSON.parse(msg.toString());
-      this.log.debug(`[${ac.getDeviceLabel()}] handleMessage -> Encryption version: %i`,
-        ac.accessory.context.device.encryptionVersion);
       if (!message.pack) {
-        this.log.debug(`[${ac.getDeviceLabel()}] handleMessage - Unknown message: %j`, message);
-        this.log.warn(`[${ac.getDeviceLabel()}] Warning: handleMessage - Unknown response from device`);
         return;
       }
-      let pack;
-      if (ac.accessory.context.device.encryptionVersion === 1) {
-        pack = crypto.decrypt_v1(message.pack, message.i === 1 ? undefined : ac.key);
-      } else if (ac.accessory.context.device.encryptionVersion === 2 && message.tag !== undefined) {
-        pack = crypto.decrypt_v2(message.pack, message.tag, message.i === 1 ? undefined : ac.key);
-      } else {
-        this.log.debug(`[${ac.getDeviceLabel()}] handleMessage - Unknown message: %j`, message);
-        this.log.warn(`[${ac.getDeviceLabel()}] Warning: handleMessage - Unknown response from device`);
-        return;
-      }
-      this.log.debug(`[${ac.getDeviceLabel()}] handleMessage - Package -> %j`, pack);
-      switch ((pack.t as string).toLowerCase()) {
-      case 'bindok': // package type is binding confirmation
-        if(!ac.accessory.bound) {
-          this.log.debug(`[${ac.getDeviceLabel()}] Device binding in progress`);
-          ac.key = pack.key;
-          this.log.debug(`[${ac.getDeviceLabel()}] Device key -> ${ac.key}`);
-          ac.requestDeviceStatus();
-        }
-        break;
-      case 'dat': // package type is device status
-      case 'res': // package type is response
+      const encryptionVersion = message.tag === undefined ? 1 : 2;
+      const pack = encryptionVersion === 1 ? crypto.decrypt_v1(message.pack, message.i === 1 ? undefined : ac.key) :
+        crypto.decrypt_v2(message.pack, message.tag, message.i === 1 ? undefined : ac.key);
+      const responseValues = pack.p === undefined ? pack.val : pack.p;
+      if (pack.t === 'bindok' && !ac.accessory.bound && typeof pack.key === 'string' && pack.key.length === 16 &&
+        pack.mac === device.mac) {
+        ac.key = pack.key;
+        device.encryptionVersion = encryptionVersion;
+        ac.session?.bindingAccepted();
+      } else if (pack.t === 'dat' && pack.mac === device.mac && ac.key !== undefined && message.i !== 1 &&
+        Array.isArray(pack.cols) && Array.isArray(pack.dat) && pack.cols.length > 0 && pack.cols.length === pack.dat.length &&
+        pack.cols.every((col: unknown) => typeof col === 'string') &&
+        pack.dat.every((value: unknown, index: number) => value === null ||
+          (typeof value === 'number' && Number.isFinite(value)) ||
+          (pack.cols[index] === commands.time.code && typeof value === 'string')) && ac.session?.statusReceived()) {
         if (!ac.accessory.bound) {
           ac.accessory.bound = true;
-          ac.initAccessory();
-          this.log.success(`[${ac.getDeviceLabel()}] Device is bound -> ${ac.accessory.context.device.mac}`);
-          socket.on('message', ac.handleMessage);
-          socket.off('message', this.handleACMessage);
-          ac.requestDeviceStatus();
-          setInterval(ac.requestDeviceStatus.bind(ac), ac.deviceConfig.statusUpdateInterval * 1000);
+          if (!this.initialized.has(device.mac)) {
+            ac.initAccessory();
+            this.initialized.add(device.mac);
+          }
+          this.log.success(`[${ac.getDeviceLabel()}] Device is bound -> ${device.mac}`);
         }
-        break;
-      default:
-        this.log.debug(`[${ac.getDeviceLabel()}] handleMessage - Unknown message: %j`, message);
-        this.log.warn(`[${ac.getDeviceLabel()}] Warning: handleMessage - Unknown response from device`);
-        break;
+        ac.handleMessage(msg, rinfo);
+        const now = Date.now();
+        this.statusSequences[device.mac] = (this.statusSequences[device.mac] || 0) + 1;
+        if (!this.statusLogTimes[device.mac] || now - this.statusLogTimes[device.mac] >= 60000) {
+          this.log.info(`[${ac.getDeviceLabel()}] UDP status received: sequence=%d at=%d poll=%ds`,
+            this.statusSequences[device.mac], now, ac.deviceConfig.statusUpdateInterval);
+          this.statusLogTimes[device.mac] = now;
+        }
+      } else if (pack.t === 'res' && ac.accessory.bound && ac.session?.isReady() && ac.key !== undefined && message.i !== 1 &&
+        Array.isArray(pack.opt) && pack.opt.length > 0 && Array.isArray(responseValues) &&
+        pack.opt.length === responseValues.length && pack.opt.every((opt: unknown) => typeof opt === 'string') &&
+        responseValues.every((value: unknown) => typeof value === 'number' && Number.isFinite(value))) {
+        ac.handleMessage(msg, rinfo);
       }
+    } catch (error) {
+      // Never include packet contents: bind replies contain encryption keys.
+      this.log.warn(`[${ac.getDeviceLabel()}] Ignoring invalid UDP response: %s`, (error as Error).name);
     }
   };
 }

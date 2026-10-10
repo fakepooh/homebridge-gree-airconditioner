@@ -94,6 +94,36 @@
               "type": "boolean",
               "default": true
             },
+            "featureSwitches": {
+              "type": "object",
+              "title": "Optionale GREE-Funktionsschalter",
+              "properties": {
+                "autoFan": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "quiet": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "powerful": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "xFan": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "health": {
+                  "type": "boolean",
+                  "default": false
+                },
+                "light": {
+                  "type": "boolean",
+                  "default": false
+                }
+              }
+            },
             "temperatureSensor": {
               "type": "string",
               "required": true,
@@ -467,6 +497,45 @@
               "flex": "1 1 50%",
               "title": "Trocknung aktiviert",
               "description": "Wenn aktiviert, wird beim Ausschalten die Trocknungsfunktion auf dem Gerät automatisch aktiviert",
+              "condition": {
+                "functionBody": "return (model.devices && model.devices[arrayIndices] && model.devices[arrayIndices].mac && /^([a-f0-9]{12}|default|[a-f0-9]+@[a-f0-9]{12})$/.test(model.devices[arrayIndices].mac) && model.devices[arrayIndices].disabled !== true);"
+              }
+            },
+            {
+              "type": "fieldset",
+              "title": "Optionale GREE-Funktionsschalter",
+              "items": [
+                {
+                  "key": "devices[].featureSwitches.autoFan",
+                  "title": "Auto-Lüfter",
+                  "description": "Wählt und meldet die automatische Lüfterstufe"
+                },
+                {
+                  "key": "devices[].featureSwitches.quiet",
+                  "title": "Leise",
+                  "description": "Momentane Aktion für minimalen Luftstrom; bleibt nicht eingeschaltet"
+                },
+                {
+                  "key": "devices[].featureSwitches.powerful",
+                  "title": "Turbo",
+                  "description": "Separater Schalter für GREE Powerful/Turbo"
+                },
+                {
+                  "key": "devices[].featureSwitches.xFan",
+                  "title": "X-Fan",
+                  "description": "Manueller X-Fan-Schalter; das automatische Verhalten von xFanEnabled gilt weiterhin"
+                },
+                {
+                  "key": "devices[].featureSwitches.health",
+                  "title": "Health",
+                  "description": "GREE-Health-Funktion"
+                },
+                {
+                  "key": "devices[].featureSwitches.light",
+                  "title": "Licht",
+                  "description": "GREE-Funktion Lig/Light"
+                }
+              ],
               "condition": {
                 "functionBody": "return (model.devices && model.devices[arrayIndices] && model.devices[arrayIndices].mac && /^([a-f0-9]{12}|default|[a-f0-9]+@[a-f0-9]{12})$/.test(model.devices[arrayIndices].mac) && model.devices[arrayIndices].disabled !== true);"
               }

@@ -79,14 +79,42 @@ By default this plugin tries to auto detect the network protocol encryption vers
 This plugin was designed to support the Home App's Heater Cooler functionality using GREE Air Conditioners. Some special features of GREE AC's are not supported natively by Apple and also dismiss support in this plugin.
 * Fan mode is supported by an additional Fan control accessory in Home App. Using this Fan control is optional. If Fan control is disabled, the Home App sees the AC device operating in fan mode as off. The Heater Cooler accessory and the Fan accessory cannot be active at the same time. The Heater Cooler accessory is always inactive if the AC device is operating in fan mode, and the Fan accessory is always inactive if the AC device is operating in heating or cooling mode.
 * Dry mode is not supported. The Home App sees the AC device operating in dry mode as off.
-* Lights of the AC unit can't be controlled.
-* Additional device functions (e.g. health mode, sleep, SE) are not supported.
+* Some additional device functions are available as optional feature switches when supported by the GREE model and firmware.
 * Horizontal swing control is not supported, it remains the same as set directly on the device.
 * GREE AC units do not support temperature ranges in auto mode, so temperature ranges have zero length in Home App.
 * GREE AC units are not able to display decimals of temperature values (if set to half a degree, e.g. 21.5 °C, then unit display may not be in sync with temperature set in Home App). To avoid this inconsistency it is recommended to set the **temperatureStepSize** configuration parameter to 1, when the AC unit is used in Celsius display mode, and to 0.5 in Fahrenheit display mode. The most convenient version is to use the Home App device (e.g. iPhone) in the same temperature display mode as the AC unit and to set the temperatureStepSize parameter to the appropriate value also. Set Homebridge UI to the same temperature units.
 * There is no way to get current heating-cooling state from the AC unit in auto mode, so displayed state in the Home App is based on temperature measurement, but internal sensor is not precise enough to always display the correct state.
 * Devices without a built-in temperature sensor display the target temperature as current temperature not the measured one. (Some AC firmware versions do not report the measured temperature but the unit has a built-in sensor. They are handled by the plugin as devices without a sensor.)
 * Silent mode (no beep on commands) is not supported on all AC units. There are some firmware versions (especially older ones) which do not support muting of commands. Some others have a bug and muting is in effect only on every second command. In these cases a firmware upgrade may help if available.
+
+### Optional GREE feature switches
+
+The optional `featureSwitches` configuration adds standard HomeKit Switch services to a device. All switches are disabled by default; omitted keys remain disabled. Enable only functions supported by your GREE model and firmware. For example:
+
+```json
+{
+  "mac": "001122aabbcc",
+  "featureSwitches": {
+    "autoFan": true,
+    "quiet": true,
+    "powerful": true,
+    "xFan": true,
+    "health": true,
+    "light": true
+  }
+}
+```
+
+The device's reported status is authoritative for persistent switches. HomeKit displays the latest known status, and later status updates reconcile changes made with a remote or another app. Before a property has been reported, its switch state is unavailable.
+
+* **Auto Fan** - reports Auto only after both `WdSpd` and `Tur` have been reported, and only when they are `0`. Turning it on requests `WdSpd=0` and `Tur=0`, including when either state is not yet known. Turning it off sends no fan-speed command; choose a manual speed or Turbo to leave Auto.
+* **Quiet** - a momentary action supported in the device's current Cool or Heat mode. In Auto, Fan, Dry, or an unknown mode, turning it on sends no Quiet or fan command. Its switch returns to Off and does not represent a persistent Quiet state.
+* **Turbo** - controls GREE Powerful/Turbo independently from fan speed. It can be turned on in the current Cool or Heat mode; in Auto, Fan, Dry, or an unknown mode, turning it on sends no Turbo or substitute fan command. It can always be turned off.
+* **X-Fan** - turns on only when the device reports Cool or Dry mode; in other or unknown modes, ON sends no command. OFF can always clear X-Fan. The existing `xFanEnabled` option still applies: a later mode change may automatically change X-Fan. Set `xFanEnabled` to `false` if you want mode changes to leave it untouched.
+* **Health** - controls the GREE Health function.
+* **Light** - controls the GREE `Lig` / Light function; the exact physical indicator behavior may vary.
+
+Support for these properties varies across GREE models and firmware. The plugin does not infer support from the model name. Enabling a switch creates its HomeKit service from configuration; its state remains unavailable until the device reports the relevant property. If a model never reports that property, the configured switch remains present but unavailable.
 
 ## Installation instructions
 
@@ -268,6 +296,14 @@ It is possible to set some or all parameters to a customized value which is assi
                     "temperatureStepSize": 1,
                     "temperatureSensor": "disabled",
                     "xFanEnabled": true,
+                    "featureSwitches": {
+                        "autoFan": false,
+                        "quiet": false,
+                        "powerful": false,
+                        "xFan": false,
+                        "health": false,
+                        "light": false
+                    },
                     "modifyVerticalSwingPosition": 0,
                     "defaultVerticalSwing": 0,
                     "fanControlEnabled": false,
@@ -321,6 +357,14 @@ You can always override any default parameter by adding a device identified by M
                     "temperatureStepSize": 1,
                     "temperatureSensor": "disabled",
                     "xFanEnabled": true,
+                    "featureSwitches": {
+                        "autoFan": false,
+                        "quiet": false,
+                        "powerful": false,
+                        "xFan": false,
+                        "health": false,
+                        "light": false
+                    },
                     "modifyVerticalSwingPosition": 0,
                     "defaultVerticalSwing": 0,
                     "fanControlEnabled": false,
@@ -354,7 +398,8 @@ _It's not recommended to add the port and ip parameters. The above example conta
   * **sensorOffset** - device temperature sensor offset value for current temperature calibration (default is 40 °C, must be specified in °C)
   * **temperatureStepSize*** - numeric parameter, valid values: 0.5 and 1 (if missing then default value is based on the UI configuration: 0.5 if UI is set to Fahrenheit temperature units and 1 if UI is set to Celsius temperature units) Controls the acceptable temperature values in Home App (It is recommended to set it to 1 if Celsius display mode is used on the AC unit and 0.5 in Fahrenheit display mode.)
   * **temperatureSensor** - controls additional temperature sensor accessory in Home App (disabled = do not add to Home App / child = add as a child accessory / separate = add as a separate (independent) accessory) _Only independent accessories can be used by automations to control other accessories._
-  * **xFanEnabled** - automatically turn on xFan functionality in supported device modes (xFan actual setting is not modified by the Home App if disabled)
+  * **xFanEnabled** - automatically set X-Fan during supported mode changes; set it to false to leave X-Fan unchanged by mode changes (an enabled `featureSwitches.xFan` still provides direct control)
+  * **featureSwitches** - opt-in HomeKit switches for GREE Auto Fan, Quiet, Turbo, X-Fan, Health, and Light functions; all are disabled by default
   * **modifyVerticalSwingPosition** - by default this plugin sets the vertical swing position to the default position of the AC device when oscillation is turned off and leaves the position untouched when the device is powered on; this parameter allows the plugin to modify the vertical swing position (the actual position is controlled by the "defaultVerticalSwing" and/or the "defaultFanVerticalSwing" parameters); valid values: Never (0) = do not modify vertical swing position, let device use default / Override default after power on (1) = override the default position each time the device is powered on _(Only the default position is changing to the selected one when turning on the device. All other positions are kept by the Home App.)_ / Override default after power on or osciallation off (2) = override the default position each time the device is powered on and when oscillation is turned off by the Home App _(Only the default position is changing to the selected one when turning on the device. All other positions are kept by the Home App. Turning off oscillation sets the selected fixed position.)_ / Always set after power on (3) = set the device to the specified vertical position each time it is powered on (regardless of the actual vertical position) / Always set after power on or osciallation off (4) = set the device to the specified vertical position each time it is powered on and when osciallation is turned off by the Home App (regardless of the actual vertical position) _(Each time powered on means that one of the enabled accessories (Heater Cooler or Fan) will be set to active)_
   * **defaultVerticalSwing** - specify the vertical swing position to be used when the plugin modifies it; if overriding is selected, then this value is valid for both heating/cooling and fan modes; if always set is selected, then this value controls only the heating/cooling modes not fan mode; valid values: Device default (0) = use device default, same position as used by the device by default without selecting a specific position / one of the following 5 positions: fixed Highest (2), fixed Higher (3), fixed Middle (4), fixed Lower (5), fixed Lowest (6)
   * **fanControlEnabled** - by default fan mode is not supported by the plugin because Apple's Heater Cooler accessory does not support fan mode; setting this parameter to true adds an additional Fan accessory to the Home App and turns on fan mode support in the plugin

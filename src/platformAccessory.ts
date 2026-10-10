@@ -1,4 +1,5 @@
 import dgram from 'dgram';
+import type { DeviceSession } from './deviceSession.js';
 import type { CharacteristicValue, Service } from 'homebridge';
 
 import type { GreeACPlatform, MyPlatformAccessory } from './platform.js';
@@ -8,6 +9,10 @@ import { GreeAirConditionerTS } from './tsAccessory.js';
 import crypto from './crypto.js';
 import type { CommandValueMap, Commands } from './commands.js';
 import commands from './commands.js';
+import { FEATURE_SWITCHES, FEATURE_SWITCH_SERVICES, autoFanFeatureSwitchCommand, featureSwitchCommand,
+  mergeFeatureSwitchConfig, projectFeatureSwitch, quietFeatureSwitchCommand, turboFeatureSwitchCommand,
+  turboRotationSpeedProjection, xFanFeatureSwitchCommand, xFanModeCommand } from './featureSwitches.js';
+import type { FeatureSwitchName } from './featureSwitches.js';
 
 /**
  * Platform Accessory
@@ -18,7 +23,10 @@ export class GreeAirConditioner {
   private HeaterCooler?: Service;
   private TemperatureSensor?: Service;
   private Fan?: Service;
+  private VerticalSwingPosition?: Service;
+  private featureSwitchServices: Partial<Record<FeatureSwitchName, Service>> = {};
   public key?: string;
+  public session?: DeviceSession;
   private cols?: Array<string>;
   private status: { [key: string]: unknown };
   private tsAccessory: GreeAirConditionerTS | null = null;
@@ -213,6 +221,17 @@ export class GreeAirConditioner {
     this.TemperatureSensor?.setPrimaryService(false);
     this.Fan?.setPrimaryService(false);
 
+    this.initFeatureSwitchServices();
+    const swingSubtype = 'gree-vertical-swing-position';
+    this.VerticalSwingPosition = this.accessory.getServiceById(this.platform.Service.WindowCovering, swingSubtype);
+    if (this.deviceConfig.verticalSwingPositionControl === true && !this.VerticalSwingPosition) {
+      this.VerticalSwingPosition = this.accessory.addService(this.platform.Service.WindowCovering,
+        'Шторка ' + this.accessory.displayName, swingSubtype);
+      for (const characteristic of [this.platform.Characteristic.CurrentPosition, this.platform.Characteristic.TargetPosition]) {
+        this.VerticalSwingPosition.getCharacteristic(characteristic).setProps({ minStep: 25 });
+      }
+    }
+
     this.platform.api.updatePlatformAccessories([this.accessory]);
 
     // each service must implement at-minimum the "required characteristics" for the given service type
@@ -220,10 +239,10 @@ export class GreeAirConditioner {
 
     // register handlers for the Active Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.Active)
-      .onSet(this.setActive.bind(this))
+      .onSet(this.guardedWrite(this.setActive))
       .onGet(this.getActive.bind(this));
     this.Fan?.getCharacteristic(this.platform.Characteristic.Active)
-      .onSet(this.setFanActive.bind(this))
+      .onSet(this.guardedWrite(this.setFanActive))
       .onGet(this.getFanActive.bind(this));
 
     // register handlers for the Current Heater-Cooler State Characteristic
@@ -237,7 +256,7 @@ export class GreeAirConditioner {
     // register handlers for the Target Heater-Cooler State Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.TargetHeaterCoolerState)
       .onGet(this.getTargetHeaterCoolerState.bind(this))
-      .onSet(this.setTargetHeaterCoolerState.bind(this));
+      .onSet(this.guardedWrite(this.setTargetHeaterCoolerState));
 
     // register handlers for the Current Temperature Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.CurrentTemperature)
@@ -248,33 +267,48 @@ export class GreeAirConditioner {
     // register handlers for the Cooling Threshold Temperature Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.CoolingThresholdTemperature)
       .onGet(this.getTargetTemperature.bind(this, 'CoolingThresholdTemperature'))
-      .onSet(this.setTargetTemperature.bind(this));
+      .onSet(this.guardedWrite(this.setTargetTemperature));
 
     // register handlers for the Heating Threshold Temperature Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.HeatingThresholdTemperature)
       .onGet(this.getTargetTemperature.bind(this, 'HeatingThresholdTemperature'))
-      .onSet(this.setTargetTemperature.bind(this));
+      .onSet(this.guardedWrite(this.setTargetTemperature));
 
     // register handlers for the Temperature Display Units Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.TemperatureDisplayUnits)
       .onGet(this.getTemperatureDisplayUnits.bind(this))
-      .onSet(this.setTemperatureDisplayUnits.bind(this));
+      .onSet(this.guardedWrite(this.setTemperatureDisplayUnits));
 
     // register handlers for the Swing Mode Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.SwingMode)
       .onGet(this.getSwingMode.bind(this))
-      .onSet(this.setSwingMode.bind(this));
+      .onSet(this.guardedWrite(this.setSwingMode));
     this.Fan?.getCharacteristic(this.platform.Characteristic.SwingMode)
       .onGet(this.getSwingMode.bind(this))
-      .onSet(this.setFanSwingMode.bind(this));
+      .onSet(this.guardedWrite(this.setFanSwingMode));
+
+    this.VerticalSwingPosition?.getCharacteristic(this.platform.Characteristic.CurrentPosition)
+      .onGet(this.getVerticalSwingPosition.bind(this));
+    this.VerticalSwingPosition?.getCharacteristic(this.platform.Characteristic.TargetPosition)
+      .onGet(this.getVerticalSwingPosition.bind(this))
+      .onSet(this.guardedWrite(this.setVerticalSwingPosition));
+    this.VerticalSwingPosition?.getCharacteristic(this.platform.Characteristic.PositionState)
+      .onGet(() => this.platform.Characteristic.PositionState.STOPPED);
 
     // register handlers for the Rotation Speed Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.RotationSpeed)
       .onGet(this.getRotationSpeed.bind(this))
-      .onSet(this.setRotationSpeed.bind(this));
+      .onSet(this.guardedWrite(this.setRotationSpeed));
     this.Fan?.getCharacteristic(this.platform.Characteristic.RotationSpeed)
       .onGet(this.getFanRotationSpeed.bind(this))
-      .onSet(this.setFanRotationSpeed.bind(this));
+      .onSet(this.guardedWrite(this.setFanRotationSpeed));
+
+    for (const name of FEATURE_SWITCHES) {
+      const service = this.featureSwitchServices[name];
+      service?.getCharacteristic(this.platform.Characteristic.On)
+        .onGet(() => this.getFeatureSwitch(name))
+        .onSet(this.guardedWrite((value) => this.setFeatureSwitch(name, value === true)));
+    }
 
     // register handlers for the Name Characteristic
     this.HeaterCooler.getCharacteristic(this.platform.Characteristic.Name)
@@ -345,6 +379,21 @@ export class GreeAirConditioner {
         DEFAULT_DEVICE_CONFIG.defaultVerticalSwing : DEFAULT_DEVICE_CONFIG.defaultVerticalSwing);
     this.platform.log.debug(`[${this.getDeviceLabel()}] Set SwingMode ->`, logValue + (logValue === 'DISABLED' ?
       ` (Position: ${this.getKeyName(commands.swingVertical.value, this.swingMode)})` : ''));
+  }
+
+  getVerticalSwingPosition() {
+    const positions = [commands.swingVertical.value.fixedHighest, commands.swingVertical.value.fixedHigher,
+      commands.swingVertical.value.fixedMiddle, commands.swingVertical.value.fixedLower, commands.swingVertical.value.fixedLowest];
+    const index = positions.indexOf(this.swingMode);
+    return index < 0 ? 0 : index * 25;
+  }
+
+  async setVerticalSwingPosition(value: CharacteristicValue) {
+    const positions = [commands.swingVertical.value.fixedHighest, commands.swingVertical.value.fixedHigher,
+      commands.swingVertical.value.fixedMiddle, commands.swingVertical.value.fixedLower, commands.swingVertical.value.fixedLowest];
+    const index = Math.max(0, Math.min(4, Math.round(Number(value) / 25)));
+    this.platform.log.debug(`[${this.getDeviceLabel()}] Set VerticalSwingPosition ->`, index * 25);
+    this.swingMode = positions[index];
   }
 
   async setFanSwingMode(value: CharacteristicValue) {
@@ -420,6 +469,98 @@ export class GreeAirConditioner {
     }
     this.accessory.context.HeaterCoolerRotationSpeed = value;
     this.platform.api.updatePlatformAccessories([this.accessory]);
+  }
+
+  private initFeatureSwitchServices() {
+    const configured = mergeFeatureSwitchConfig(undefined, this.deviceConfig.featureSwitches);
+    for (const name of FEATURE_SWITCHES) {
+      const { displayName, subtype } = FEATURE_SWITCH_SERVICES[name];
+      const cached = this.accessory.getServiceById(this.platform.Service.Switch, subtype);
+      if (configured[name]) {
+        const service = cached ||
+          this.accessory.addService(this.platform.Service.Switch, displayName, subtype);
+        this.featureSwitchServices[name] = service;
+        service.setCharacteristic(this.platform.Characteristic.Name, displayName);
+        if (!service.testCharacteristic(this.platform.Characteristic.ConfiguredName)) {
+          service.addOptionalCharacteristic(this.platform.Characteristic.ConfiguredName);
+        }
+        const configuredName = service.getCharacteristic(this.platform.Characteristic.ConfiguredName);
+        // Seed only missing names; cached HomeKit names must survive initialization.
+        if (typeof configuredName.value !== 'string' || configuredName.value.trim() === '') {
+          configuredName.updateValue(displayName);
+        }
+        configuredName.onSet((value) => {
+          if (typeof value !== 'string' || value.trim() === '') {
+            throw new Error('Feature switch name cannot be empty');
+          }
+          configuredName.updateValue(value);
+          this.platform.api.updatePlatformAccessories([this.accessory]);
+        });
+      } else if (cached) {
+        this.accessory.removeService(cached);
+      }
+    }
+  }
+
+  private async getFeatureSwitch(name: FeatureSwitchName): Promise<CharacteristicValue> {
+    const value = projectFeatureSwitch(name, this.status);
+    if (value === undefined) {
+      throw new Error(`GREE ${FEATURE_SWITCH_SERVICES[name].displayName} state is not available yet`);
+    }
+    return value;
+  }
+
+  private setFeatureSwitch(name: FeatureSwitchName, enabled: boolean) {
+    const service = this.featureSwitchServices[name];
+    if (!service) {
+      return;
+    }
+    if (name === 'quiet') {
+      const command = quietFeatureSwitchCommand(enabled, this.status[commands.mode.code],
+        commands.mode.value.cool, commands.mode.value.heat);
+      if (Object.keys(command).length > 0) {
+        this.sendCommand(command);
+        this.platform.log.info(`[${this.getDeviceLabel()}] quietMode ->`, this.getKeyName(commands.quietMode.value,
+          commands.quietMode.value.on));
+      }
+      setTimeout(() => this.updateFeatureSwitchValue(name), 0);
+      return;
+    }
+    if (name === 'autoFan' && !enabled) {
+      const current = projectFeatureSwitch(name, this.status);
+      if (current !== undefined) {
+        setTimeout(() => this.updateFeatureSwitchValue(name), 0);
+      }
+      return;
+    }
+    if (name === 'autoFan') {
+      const command = enabled ? autoFanFeatureSwitchCommand(this.status) : {};
+      if (Object.keys(command).length > 0) {
+        this.sendCommand(command);
+      }
+    } else if (name === 'powerful') {
+      const command = turboFeatureSwitchCommand(enabled, this.status[commands.mode.code],
+        commands.mode.value.cool, commands.mode.value.heat);
+      if (Object.keys(command).length > 0) {
+        this.sendCommand(command);
+      }
+    } else if (name === 'xFan') {
+      const command = xFanFeatureSwitchCommand(enabled, this.status[commands.mode.code],
+        commands.mode.value.cool, commands.mode.value.dry);
+      if (Object.keys(command).length > 0) {
+        this.sendCommand(command);
+      }
+    } else {
+      this.sendCommand(featureSwitchCommand(name, enabled));
+    }
+    setTimeout(() => this.updateFeatureSwitchValue(name), 0);
+  }
+
+  private updateFeatureSwitchValue(name: FeatureSwitchName) {
+    const value = projectFeatureSwitch(name, this.status);
+    if (value !== undefined) {
+      this.featureSwitchServices[name]?.getCharacteristic(this.platform.Characteristic.On).updateValue(value);
+    }
   }
 
   async setFanRotationSpeed(value: CharacteristicValue) {
@@ -1079,16 +1220,12 @@ export class GreeAirConditioner {
     }
     let logValue = 'mode -> ' + this.getKeyName(commands.mode.value, value);
     const command: Record<string, unknown> = { [commands.mode.code]: value };
-    if (this.deviceConfig.xFanEnabled && (this.status[commands.xFan.code] || commands.xFan.value.off) !== commands.xFan.value.on &&
-      [commands.mode.value.cool, commands.mode.value.dry].includes(value)) {
-      // turn on xFan in Cool and Dry mode if xFan is enabled for this device
-      logValue += ', xFan -> ' + this.getKeyName(commands.xFan.value, commands.xFan.value.on);
-      command[commands.xFan.code] = commands.xFan.value.on;
-    } else if (this.deviceConfig.xFanEnabled && (this.status[commands.xFan.code] || commands.xFan.value.on) !== commands.xFan.value.off &&
-      ![commands.mode.value.cool, commands.mode.value.dry].includes(value)) {
-      // turn off xFan in unsupported modes (only Cool and Dry modes support xFan)
-      logValue += ', xFan -> ' + this.getKeyName(commands.xFan.value, commands.xFan.value.off);
-      command[commands.xFan.code] = commands.xFan.value.off;
+    const xFanCommand = xFanModeCommand(this.deviceConfig.xFanEnabled, value, this.status[commands.xFan.code],
+      commands.mode.value.cool, commands.mode.value.dry);
+    if (Object.hasOwn(xFanCommand, commands.xFan.code)) {
+      const xFanValue = xFanCommand[commands.xFan.code];
+      logValue += ', xFan -> ' + this.getKeyName(commands.xFan.value, xFanValue);
+      command[commands.xFan.code] = xFanValue;
     }
     if (this.accessory.context.HeaterCoolerRotationSpeed !== 0 &&
       [commands.mode.value.cool, commands.mode.value.heat, commands.mode.value.auto].includes(value)) {
@@ -1398,6 +1535,7 @@ export class GreeAirConditioner {
   }
 
   updateStatus(props: string[]) {
+    this.updateFeatureSwitches(props);
     this.platform.log.debug(`[${this.getDeviceLabel()}] updateStatus -> %j`, props);
     const hcActive = this.power && [commands.mode.value.cool, commands.mode.value.heat, commands.mode.value.auto].includes(this.mode);
     const fanActive = this.power && this.mode === commands.mode.value.fan;
@@ -1548,6 +1686,14 @@ export class GreeAirConditioner {
       this.HeaterCooler?.getCharacteristic(this.platform.Characteristic.SwingMode)
         .updateValue(swing);
     }
+    if (props.includes(commands.swingVertical.code) && this.VerticalSwingPosition) {
+      const position = this.getVerticalSwingPosition();
+      this.VerticalSwingPosition.getCharacteristic(this.platform.Characteristic.CurrentPosition).updateValue(position);
+      this.VerticalSwingPosition.getCharacteristic(this.platform.Characteristic.TargetPosition).updateValue(position);
+      this.VerticalSwingPosition.getCharacteristic(this.platform.Characteristic.PositionState)
+        .updateValue(this.platform.Characteristic.PositionState.STOPPED);
+    }
+
     // Heater-Cooler Rotation Speed
     if (hcActive) {
       const maxSpeed = this.HeaterCooler?.getCharacteristic(this.platform.Characteristic.RotationSpeed).props.maxValue ||
@@ -1559,11 +1705,12 @@ export class GreeAirConditioner {
         this.accessory.context.HeaterCoolerRotationSpeed = 1;
       } else if (props.includes(commands.powerfulMode.code) && this.powerfulMode === commands.powerfulMode.value.on) {
         // powerfulMode -> on
+        const projection = turboRotationSpeedProjection(maxSpeed, this.accessory.context.HeaterCoolerRotationSpeed);
         this.platform.log.debug(`[${this.getDeviceLabel()}] updateStatus (Heater-Cooler Rotation Speed) ->`,
-          `${maxSpeed.toString()} (powerful)`);
-        this.HeaterCooler?.getCharacteristic(this.platform.Characteristic.RotationSpeed).updateValue(maxSpeed);
-        this.accessory.context.HeaterCoolerRotationSpeed = maxSpeed;
-      } else if (props.includes(commands.speed.code)) {
+          `${projection.rotationSpeed.toString()} (powerful)`);
+        this.HeaterCooler?.getCharacteristic(this.platform.Characteristic.RotationSpeed).updateValue(projection.rotationSpeed);
+        this.accessory.context.HeaterCoolerRotationSpeed = projection.preferredSpeed;
+      } else if (props.includes(commands.speed.code) || props.includes(commands.powerfulMode.code)) {
         let speedValue = 2; // default: auto
         switch (this.speed) {
         case commands.speed.value.low:
@@ -1619,6 +1766,26 @@ export class GreeAirConditioner {
     }
   }
 
+  private updateFeatureSwitches(props: string[]) {
+    const properties: Record<FeatureSwitchName, string[]> = {
+      autoFan: [commands.speed.code, commands.powerfulMode.code],
+      quiet: [commands.quietMode.code],
+      powerful: [commands.powerfulMode.code],
+      xFan: [commands.xFan.code],
+      health: [commands.health.code],
+      light: [commands.light.code],
+    };
+    for (const name of FEATURE_SWITCHES) {
+      if (!properties[name].some((property) => props.includes(property))) {
+        continue;
+      }
+      const value = projectFeatureSwitch(name, this.status);
+      if (value !== undefined) {
+        this.featureSwitchServices[name]?.getCharacteristic(this.platform.Characteristic.On).updateValue(value);
+      }
+    }
+  }
+
   // device communication functions
 
   handleMessage = (msg: Buffer, rinfo: {address: string, family: string, port: number, size: number}) => {
@@ -1642,7 +1809,7 @@ export class GreeAirConditioner {
         this.platform.log.warn(`[${this.getDeviceLabel()}] Warning: handleMessage - Unknown response from device`);
         return;
       }
-      this.platform.log.debug(`[${this.getDeviceLabel()}] handleMessage - Package -> %j`, pack);
+      this.platform.log.debug(`[${this.getDeviceLabel()}] handleMessage - Package -> %j`, { ...pack, key: undefined });
       switch ((pack.t as string).toLowerCase()) {
       case 'bindok': // package type is binding confirmation
         this.platform.log.warn(`[${this.getDeviceLabel()}] Warning: Binding response received from already bound device`);
@@ -1730,7 +1897,24 @@ export class GreeAirConditioner {
     }
   };
 
+  private requireReadyForCommand() {
+    if (!this.accessory.bound || this.key === undefined || (this.session && !this.session.isReady())) {
+      throw new this.platform.api.hap.HapStatusError(this.platform.api.hap.HAPStatus.SERVICE_COMMUNICATION_FAILURE);
+    }
+  }
+
+  private guardedWrite(handler: (value: CharacteristicValue) => void | Promise<void>) {
+    return (value: CharacteristicValue) => {
+      // Reject before a setter changes cached preferences or skips a matching old value.
+      this.requireReadyForCommand();
+      return handler.call(this, value);
+    };
+  }
+
   sendMessage(message: unknown) {
+    if ((message as { t?: string }).t === 'cmd') {
+      this.requireReadyForCommand();
+    }
     this.platform.log.debug(`[${this.getDeviceLabel()}] sendMessage - Package -> %j`, message);
     this.platform.log.debug(`[${this.getDeviceLabel()}] sendMessage -> Encryption version: %i`,
       this.accessory.context.device.encryptionVersion);
@@ -1767,17 +1951,25 @@ export class GreeAirConditioner {
     try {
       const msg = JSON.stringify(payload);
       this.platform.log.debug(`[${this.getDeviceLabel()}] sendMessage`, msg);
-      this.socket.send(
-        msg,
-        this.accessory.context.device.port,
-        this.accessory.context.device.address,
-      );
+      this.socket.send(msg, this.accessory.context.device.port, this.accessory.context.device.address, (error) => {
+        if (error) {
+          this.platform.log.error(`[${this.getDeviceLabel()}] UDP send failed: type=%s destination=%s:%s encryption=%s code=%s`,
+            (message as { t?: string }).t, this.accessory.context.device.address, this.accessory.context.device.port,
+            this.accessory.context.device.encryptionVersion, (error as NodeJS.ErrnoException).code || error.message);
+          if (['EHOSTUNREACH', 'EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code || '')) {
+            this.platform.log.warn(`[${this.getDeviceLabel()}] Check host routing and this Homebridge process's Local Network permission`);
+          }
+          this.session?.transportFailed();
+        }
+      });
     } catch (err) {
       this.platform.log.error(`[${this.getDeviceLabel()}] sendMessage - Error:`, (err as Error).message);
     }
   }
 
   sendCommand(cmd: Record<string, unknown>) {
+    // Do not latch pending power/mode or send with the generic bind key during recovery.
+    this.requireReadyForCommand();
     if (this.isSilentTime()) {
       // add buzzer off command if current time is in silent time range
       cmd[commands.buzzer.code] = commands.buzzer.value.off;
